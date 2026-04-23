@@ -110,7 +110,9 @@ async def start_scrape(req: ScrapeRequest):
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        # Avoid deadlocks if the scraper logs heavily to stderr (common on Windows).
+        # Merging keeps the SSE stream flowing and prevents the stderr pipe buffer filling.
+        stderr=asyncio.subprocess.STDOUT,
         cwd=str(BACKEND_ROOT),
     )
     _active_process = process
