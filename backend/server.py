@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -79,12 +80,10 @@ async def start_scrape(req: ScrapeRequest):
     xlsx_path = session_dir / "leads.xlsx"
     txt_path = session_dir / "leads.txt"
 
-    # Detect python executable — prefer the project root venv
-    project_root = BACKEND_ROOT.parent
-    venv_python = project_root / "venv" / "Scripts" / "python.exe"
-    if not venv_python.exists():
-        venv_python = project_root / "venv" / "bin" / "python"
-    python_exe = str(venv_python) if venv_python.exists() else "python"
+    # Always spawn the scraper with the same interpreter as the backend.
+    # This avoids mismatches where Playwright is installed in a venv but the scraper
+    # is executed with system Python (common on Windows).
+    python_exe = sys.executable or "python"
 
     cmd = [
         python_exe,
@@ -283,11 +282,8 @@ async def enrich_website(req: EnrichRequest):
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
-    project_root = BACKEND_ROOT.parent
-    venv_python = project_root / "venv" / "Scripts" / "python.exe"
-    if not venv_python.exists():
-        venv_python = project_root / "venv" / "bin" / "python"
-    python_exe = str(venv_python) if venv_python.exists() else "python"
+    # Use the backend interpreter so Playwright dependencies match.
+    python_exe = sys.executable or "python"
 
     # Inline script to visit and extract
     script = f'''
