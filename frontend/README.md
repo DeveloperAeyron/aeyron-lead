@@ -2,6 +2,19 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+## Backend API URL (local vs ngrok)
+
+This app calls the backend using `NEXT_PUBLIC_API_URL`.
+
+- Copy `frontend/.env.example` to `frontend/.env.local`
+- Set your backend URL, for example:
+
+```bash
+NEXT_PUBLIC_API_URL=https://YOUR-SUBDOMAIN.ngrok-free.app
+```
+
+Restart `npm run dev` after changing env vars.
+
 First, run the development server:
 
 ```bash

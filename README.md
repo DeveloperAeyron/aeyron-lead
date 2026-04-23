@@ -14,6 +14,19 @@ The scripts will launch:
 *   **Backend Server**: Running on `http://localhost:8000`
 *   **Frontend Dashboard**: Running on `http://localhost:3000`
 
+## 🔌 Point the frontend at a different backend (e.g. ngrok)
+
+The frontend reads `NEXT_PUBLIC_API_URL` to decide where to call the backend.
+
+- Create `frontend/.env.local` (do not commit it)
+- Put your backend URL in it:
+
+```bash
+NEXT_PUBLIC_API_URL=https://YOUR-SUBDOMAIN.ngrok-free.app
+```
+
+Restart the frontend dev server after changing env vars.
+
 ---
 
 ## 🛠️ Project Structure
