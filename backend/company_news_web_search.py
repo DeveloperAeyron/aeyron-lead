@@ -1256,15 +1256,23 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             browser = await p.chromium.launch(headless=args.headless and not args.headed)
         except Exception as exc:
             detail = str(exc)
+            if "Executable doesn't exist" in detail or "playwright install" in detail:
+                raise SystemExit(
+                    "Playwright is installed, but Chromium is not installed for this Python environment.\n"
+                    "Run:\n"
+                    "  python -m playwright install chromium"
+                ) from exc
             if (
                 "BrowserType.launch" in detail
                 or "MachPortRendezvous" in detail
                 or "Permission denied" in detail
             ):
                 raise SystemExit(
-                    "Playwright could not launch Chromium in this environment. "
-                    "Run the script from a normal terminal, or grant browser-launch "
-                    "permission in the sandbox and try again."
+                    "Playwright could not launch Chromium in this environment.\n"
+                    "First make sure Chromium is installed:\n"
+                    "  python -m playwright install chromium\n"
+                    "Then run from a normal terminal. If this is inside Codex sandbox, "
+                    "browser-launch permission may also be required."
                 ) from exc
             raise
         context = await browser.new_context(
