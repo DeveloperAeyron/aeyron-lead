@@ -22,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`} suppressHydrationWarning>
-      <body className="min-h-full flex font-sans">
+      <body className="min-h-full flex font-sans" suppressHydrationWarning>
         <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem>
           <Sidebar />
           <main className="flex-1 overflow-y-auto h-screen scrollbar-thin relative">
