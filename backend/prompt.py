@@ -100,6 +100,31 @@ Best regards,
 """.strip()
 
 
+# Prefer fetched page text over SERP snippets when building Ollama context.
+_FETCHED_BODY_MIN_CHARS = 280
+
+
+def best_evidence_body(item: Mapping[str, Any]) -> str:
+    """Return the richest available text for a search or insight row.
+
+    Fetched page bodies (when ``--fetch-pages`` ran in research) should win over
+    short search snippets; Hugging Face summaries sit between the two.
+    """
+    fetched = str(item.get("fetched_text") or "").strip()
+    if len(fetched) >= _FETCHED_BODY_MIN_CHARS:
+        return fetched
+    hf_summary = str(item.get("hf_summary") or "").strip()
+    if hf_summary:
+        return hf_summary
+    if fetched:
+        return fetched
+    for key in ("evidence", "snippet", "raw_text"):
+        text = str(item.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
 OUTPUT_CONTRACT: dict[str, Any] = {
     "subject_lines": "array of exactly 5 strings; each 5–9 words; role- or company-specific; no hype",
     "primary_email": {
@@ -145,24 +170,27 @@ def _format_news_context(news_context: Sequence[Mapping[str, Any]] | Mapping[str
         return "No scraped company or news context was provided."
 
     if isinstance(news_context, str):
-        return _clean(news_context, max_chars=4_000)
+        return _clean(news_context, max_chars=24_000)
 
     if isinstance(news_context, Mapping):
-        return json.dumps(news_context, ensure_ascii=False, indent=2)[:4_000]
+        blob = json.dumps(news_context, ensure_ascii=False, indent=2)
+        return blob[:24_000] if len(blob) > 24_000 else blob
 
     bullets = []
     for item in news_context[:8]:
         if not isinstance(item, Mapping):
             continue
         title = _clean(item.get("title") or item.get("summary") or item.get("theme"), max_chars=220)
-        snippet = _clean(item.get("snippet") or item.get("evidence") or item.get("fetched_text"), max_chars=550)
+        snippet = _clean(best_evidence_body(item), max_chars=8_000)
         url = _clean(item.get("url") or item.get("source_url"), max_chars=220)
         if title or snippet:
             bullets.append({"title": title, "snippet": snippet, "url": url})
 
     if not bullets:
         return "No usable scraped company or news context was provided."
-    return json.dumps(bullets, ensure_ascii=False, indent=2)
+    serialised = json.dumps(bullets, ensure_ascii=False, indent=2)
+    # Cap whole block so system prompt plus user context stays within typical model limits.
+    return serialised[:24_000] if len(serialised) > 24_000 else serialised
 
 
 def build_email_generation_prompt(

@@ -18,7 +18,7 @@ BACKEND_ROOT = Path(__file__).resolve().parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from prompt import build_email_generation_prompt
+from prompt import best_evidence_body, build_email_generation_prompt
 
 
 GENERATED_COLUMNS = [
@@ -194,12 +194,10 @@ def _ollama_chat(
 
 
 def _result_to_context(item: Mapping[str, Any]) -> dict[str, str]:
+    body = best_evidence_body(item)
     return {
         "title": _clean(item.get("title") or item.get("summary") or item.get("theme"), max_chars=180),
-        "snippet": _clean(
-            item.get("snippet") or item.get("evidence") or item.get("fetched_text") or item.get("raw_text"),
-            max_chars=550,
-        ),
+        "snippet": _clean(body, max_chars=12_000),
         "url": _clean(item.get("url") or item.get("source_url"), max_chars=220),
     }
 
@@ -644,7 +642,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout-s", type=int, default=300, help="Ollama request timeout seconds.")
     parser.add_argument("--temperature", type=float, default=0.25, help="Generation temperature.")
     parser.add_argument("--context-items", type=int, default=5, help="Max research context items sent to Ollama.")
-    parser.add_argument("--context-snippet-chars", type=int, default=350, help="Max chars per context snippet sent to Ollama.")
+    parser.add_argument(
+        "--context-snippet-chars",
+        type=int,
+        default=2800,
+        help="Max chars per context item after research (default 2800; fetched pages are capped in research at 12k).",
+    )
     parser.add_argument("--sleep-ms", type=int, default=0, help="Delay between Ollama calls.")
     parser.add_argument("--encoding", default="utf-8-sig", help="CSV encoding.")
     parser.add_argument("--no-research", action="store_true", help="One-off mode only: skip live company research.")
