@@ -570,7 +570,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "this is used before live research."
         ),
     )
-    parser.add_argument("--model", default="qwen3.5:9b", help='Ollama model name. Default: "qwen3.5:9b"')
+    parser.add_argument("--model", default="qwen2.5:3b", help='Ollama model name. Default: "qwen2.5:3b"')
     parser.add_argument(
         "--ollama-url",
         default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
