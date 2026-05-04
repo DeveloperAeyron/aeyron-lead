@@ -176,7 +176,7 @@ export default function OutreachPage() {
     e.preventDefault();
     setBatchError(null);
     if (!batchFile) {
-      setBatchError("Choose an Excel file (.xlsx).");
+      setBatchError("Choose a CSV or Excel file (.csv, .xlsx).");
       return;
     }
     setBatchLoading(true);
@@ -251,11 +251,11 @@ export default function OutreachPage() {
 
         <div className="space-y-2">
           <label className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-            Excel workbook (.xlsx)
+            CSV or Excel (.csv, .xlsx)
           </label>
           <input
             type="file"
-            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={(e) => setBatchFile(e.target.files?.[0] ?? null)}
             className="block w-full text-sm text-[var(--text-secondary)] file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-teal-500/20 file:text-teal-200"
           />

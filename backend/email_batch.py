@@ -25,6 +25,8 @@ from generate_news_emails_ollama import (
 
 _EMAIL_KEYS = ("email", "e-mail", "e mail", "email address", "mail")
 _NAME_KEYS = ("name", "full name", "contact name", "recipient name", "contact")
+_FIRST_KEYS = ("first name", "firstname", "given name", "first")
+_LAST_KEYS = ("last name", "lastname", "surname", "family name", "last")
 _COMPANY_KEYS = (
     "company name",
     "company",
@@ -34,6 +36,8 @@ _COMPANY_KEYS = (
     "business name",
     "employer",
 )
+_POSITION_KEYS = ("position", "title", "job title", "role")
+_INDUSTRY_KEYS = ("industry", "sector", "vertical")
 
 
 def _norm_header(h: str) -> str:
@@ -59,12 +63,20 @@ def _pick_field(row: Mapping[str, Any], candidates: tuple[str, ...]) -> str:
     return ""
 
 
-def extract_contact_fields(row: Mapping[str, Any]) -> tuple[str, str, str]:
-    """Return (email, full name, company) from a flexible spreadsheet row."""
+def extract_row_for_prompt(
+    row: Mapping[str, Any], base: EmailGenerationInput
+) -> tuple[str, str, str, str, str, str]:
+    """email, first, last, company, position, industry (per-row titles from CSV/Excel when present)."""
     email = _pick_field(row, _EMAIL_KEYS)
-    name = _pick_field(row, _NAME_KEYS)
     company = _pick_field(row, _COMPANY_KEYS)
-    return email, name, company
+    fn = _pick_field(row, _FIRST_KEYS)
+    ln = _pick_field(row, _LAST_KEYS)
+    if not fn and not ln:
+        full = _pick_field(row, _NAME_KEYS)
+        fn, ln = split_full_name(full)
+    position = _pick_field(row, _POSITION_KEYS) or (base.position or "")
+    industry = _pick_field(row, _INDUSTRY_KEYS) or (base.industry or "")
+    return email, fn, ln, company, position, industry
 
 
 def load_rows_from_xlsx(content: bytes) -> list[dict[str, Any]]:
@@ -96,6 +108,40 @@ def load_rows_from_xlsx(content: bytes) -> list[dict[str, Any]]:
         wb.close()
 
 
+def load_rows_from_csv(content: bytes) -> list[dict[str, Any]]:
+    """Parse CSV (comma, semicolon, or tab). UTF-8 with BOM and Latin-1 fallback; supports quoted multiline fields."""
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    sample = text[: min(16_384, len(text))]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+
+    f = io.StringIO(text)
+    reader = csv.DictReader(f, dialect=dialect)
+    out: list[dict[str, Any]] = []
+    for r in reader:
+        if not r:
+            continue
+        if all((v is None or str(v).strip() == "") for v in r.values()):
+            continue
+        cleaned: dict[str, Any] = {}
+        for k, v in r.items():
+            if k is None:
+                continue
+            key = str(k).strip()
+            if not key:
+                continue
+            cleaned[key] = "" if v is None else str(v).strip()
+        if cleaned:
+            out.append(cleaned)
+    return out
+
+
 def process_batch(
     rows: list[dict[str, Any]],
     base: EmailGenerationInput,
@@ -124,8 +170,7 @@ def process_batch(
         for c in extra_cols:
             line_out.setdefault(c, "")
 
-        email, full_name, company = extract_contact_fields(raw)
-        first, last = split_full_name(full_name)
+        email, first, last, company, position, industry = extract_row_for_prompt(raw, base)
 
         if not company:
             line_out["generation_error"] = "Missing company name (use a column named e.g. company name or company)."
@@ -137,8 +182,8 @@ def process_batch(
             first_name=first,
             last_name=last,
             company_name=company,
-            position=base.position,
-            industry=base.industry,
+            position=position,
+            industry=industry,
         )
 
         raw_news: list[dict[str, str]] = []

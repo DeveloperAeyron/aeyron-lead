@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from email_batch import load_rows_from_xlsx, process_batch, rows_to_csv_bytes
+from email_batch import load_rows_from_csv, load_rows_from_xlsx, process_batch, rows_to_csv_bytes
 from email_generation import EmailGenerationInput, generate_email_draft
 
 logging.basicConfig(
@@ -352,28 +352,30 @@ async def generate_email_batch(
     context_snippet_chars: int = Form(4000),
 ):
     """
-    Accept a .xlsx with columns such as email, name, company name.
+    Accept .csv, .xlsx, or .xlsm with columns such as email, name (or first/last name), company name.
     Returns a CSV download with subject, body, news based summary, plus any errors per row.
     Research is cached per company; context limits are raised for richer personalisation.
     """
-    name = (file.filename or "").lower()
-    if not name.endswith((".xlsx", ".xlsm")):
+    fname = (file.filename or "").lower()
+    if not fname.endswith((".xlsx", ".xlsm", ".csv")):
         raise HTTPException(
             status_code=400,
-            detail="Upload an Excel workbook (.xlsx or .xlsm).",
+            detail="Upload a CSV or Excel file (.csv, .xlsx, or .xlsm).",
         )
     raw = await file.read()
     if len(raw) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large (max 25 MB).")
 
     def load_sheet() -> list[dict[str, Any]]:
+        if fname.endswith(".csv"):
+            return load_rows_from_csv(raw)
         return load_rows_from_xlsx(raw)
 
     try:
         rows = await asyncio.to_thread(load_sheet)
     except Exception as exc:
-        LOG.exception("Excel read failed")
-        raise HTTPException(status_code=400, detail=f"Could not read spreadsheet: {exc}") from exc
+        LOG.exception("Sheet read failed")
+        raise HTTPException(status_code=400, detail=f"Could not read file: {exc}") from exc
 
     if not rows:
         raise HTTPException(status_code=400, detail="No data rows found under the header row.")
