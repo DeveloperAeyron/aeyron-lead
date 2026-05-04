@@ -29,6 +29,7 @@ GENERATED_COLUMNS = [
     "Generated Evidence",
     "Generated Offer",
     "Generation Confidence",
+    "Generated Alternatives (JSON)",
     "Generation Error",
 ]
 
@@ -372,6 +373,45 @@ def _row_news_context(row: Mapping[str, Any]) -> list[dict[str, str]]:
     return items
 
 
+def _normalise_generation_payload(generation: Mapping[str, Any]) -> dict[str, Any]:
+    """Map nested master-prompt JSON (or legacy flat keys) onto pipeline field names."""
+    if isinstance(generation.get("primary_email"), Mapping):
+        pe = generation["primary_email"]
+        meta = generation["metadata"] if isinstance(generation.get("metadata"), Mapping) else {}
+        conf_raw = str(meta.get("confidence") or "").strip().lower()
+        confidence = ""
+        for token in re.split(r"[^\w]+", conf_raw):
+            if token in {"low", "medium", "high"}:
+                confidence = token
+                break
+        alts = {
+            "subject_lines": generation.get("subject_lines"),
+            "variation_1": generation.get("variation_1"),
+            "variation_2": generation.get("variation_2"),
+        }
+        return {
+            "subject": pe.get("subject"),
+            "email_body": pe.get("body") or pe.get("email_body"),
+            "pain_point": meta.get("pain_point"),
+            "why_now": meta.get("why_now"),
+            "evidence_used": meta.get("evidence_used"),
+            "offer": meta.get("product_used"),
+            "confidence": confidence,
+            "generated_alternatives_json": json.dumps(alts, ensure_ascii=False, indent=2),
+        }
+
+    return {
+        "subject": generation.get("subject"),
+        "email_body": generation.get("email_body"),
+        "pain_point": generation.get("pain_point"),
+        "why_now": generation.get("why_now"),
+        "evidence_used": generation.get("evidence_used"),
+        "offer": generation.get("offer"),
+        "confidence": str(generation.get("confidence") or "").strip().lower(),
+        "generated_alternatives_json": "",
+    }
+
+
 def _prepare_output_fieldnames(rows: list[dict[str, str]]) -> list[str]:
     fieldnames: list[str] = []
     for row in rows[:1]:
@@ -383,15 +423,17 @@ def _prepare_output_fieldnames(rows: list[dict[str, str]]) -> list[str]:
 
 
 def _apply_generation(row: dict[str, Any], generation: Mapping[str, Any]) -> dict[str, Any]:
+    gen = _normalise_generation_payload(generation)
     output = dict(row)
-    output["Subject"] = _clean(generation.get("subject"), max_chars=180) or output.get("Subject", "")
-    output["Email Body"] = str(generation.get("email_body") or output.get("Email Body", "")).strip()
-    output["Generated Pain Point"] = _clean(generation.get("pain_point"))
-    output["Generated Why Now"] = _clean(generation.get("why_now"))
-    output["Generated Evidence"] = _clean(generation.get("evidence_used"))
-    output["Generated Offer"] = _clean(generation.get("offer"))
-    confidence = str(generation.get("confidence") or "").strip().lower()
+    output["Subject"] = _clean(gen.get("subject"), max_chars=180) or output.get("Subject", "")
+    output["Email Body"] = str(gen.get("email_body") or output.get("Email Body", "")).strip()
+    output["Generated Pain Point"] = _clean(gen.get("pain_point"))
+    output["Generated Why Now"] = _clean(gen.get("why_now"))
+    output["Generated Evidence"] = _clean(gen.get("evidence_used"))
+    output["Generated Offer"] = _clean(gen.get("offer"))
+    confidence = str(gen.get("confidence") or "").strip().lower()
     output["Generation Confidence"] = confidence if confidence in {"low", "medium", "high"} else ""
+    output["Generated Alternatives (JSON)"] = str(gen.get("generated_alternatives_json") or "").strip()
     output["Generation Error"] = ""
     return output
 
@@ -415,20 +457,27 @@ def _single_company_row(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _print_single_email(row: Mapping[str, Any], generation: Mapping[str, Any]) -> None:
+    gen = _normalise_generation_payload(generation)
     company = _row_value(row, "Company Name", "company", "company_name")
     print(f"Company: {company}")
-    print(f"Subject: {_clean(generation.get('subject'), max_chars=180)}")
+    print(f"Subject: {_clean(gen.get('subject'), max_chars=180)}")
     print()
-    print(str(generation.get("email_body") or "").strip())
+    print(str(gen.get("email_body") or "").strip())
 
-    pain = _clean(generation.get("pain_point"))
-    evidence = _clean(generation.get("evidence_used"))
+    pain = _clean(gen.get("pain_point"))
+    evidence = _clean(gen.get("evidence_used"))
     if pain or evidence:
         print()
         if pain:
             print(f"Pain point: {pain}")
         if evidence:
             print(f"Evidence used: {evidence}")
+
+    alts = gen.get("generated_alternatives_json") or ""
+    if alts.strip():
+        print()
+        print("--- Alternatives (JSON) ---")
+        print(alts.strip())
 
 
 def _run_single_company(args: argparse.Namespace) -> int:
@@ -591,7 +640,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-fetch-pages", action="store_true", help="One-off mode: do not fetch result pages.")
     parser.add_argument("--no-linkedin", action="store_true", help="One-off mode: skip LinkedIn result discovery.")
     parser.add_argument("--headed", action="store_true", help="One-off mode: show Chromium during research.")
-    parser.add_argument("--verbose", action="store_true", help="Print progress to stderr.")
+    parser.add_argument(
+        "--verbose",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Print progress to stderr (default: on). Use --no-verbose to silence.",
+    )
     args = parser.parse_args(argv)
     args.company_name = args.company_flag or args.company or ""
     if not args.input and not args.company_name:
