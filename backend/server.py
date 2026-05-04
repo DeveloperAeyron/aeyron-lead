@@ -38,12 +38,29 @@ SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── App ────────────────────────────────────────────────────────────────
 app = FastAPI(title="Lead Radar API", version="1.0.0")
+
+# Browsers reject Access-Control-Allow-Origin: * when credentials are enabled.
+# Preflight OPTIONS is handled by this middleware — no extra route is required.
+_cors_raw = (os.getenv("CORS_ORIGINS") or "*").strip()
+if _cors_raw == "*":
+    _cors_allow_origins = ["*"]
+    _cors_allow_credentials = False
+else:
+    _cors_allow_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+    _cors_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # ── State ──────────────────────────────────────────────────────────────
