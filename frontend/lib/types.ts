@@ -73,6 +73,8 @@ export const DEFAULT_CONFIG: ScrapeConfig = {
 export interface EmailDraftResult {
   subject: string;
   email_body: string;
+  /** Research snippets summarised for export or display */
+  news_based_summary?: string;
   pain_point: string;
   why_now: string;
   evidence_used: string;

@@ -1,9 +1,10 @@
 """Shared email draft generation for API and CLI (Ollama + prompt.py)."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from prompt import build_email_generation_prompt
 
@@ -17,6 +18,33 @@ from generate_news_emails_ollama import (
     _row_news_context,
     _trim_news_context,
 )
+
+
+def news_based_summary_from_context(
+    items: Sequence[Mapping[str, str]],
+    *,
+    max_chars: int = 12_000,
+) -> str:
+    """Readable summary of research snippets sent to the model (for CSV export)."""
+    blocks: list[str] = []
+    for it in items:
+        title = (it.get("title") or "").strip()
+        snip = (it.get("snippet") or "").strip()
+        url = (it.get("url") or "").strip()
+        parts: list[str] = []
+        if title:
+            parts.append(title)
+        if snip:
+            parts.append(snip)
+        line = "\n".join(parts) if parts else ""
+        if url:
+            line = f"{line}\nURL: {url}" if line else f"URL: {url}"
+        if line.strip():
+            blocks.append(line.strip())
+    text = "\n\n---\n\n".join(blocks)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
 
 
 @dataclass
@@ -55,6 +83,40 @@ def _research_namespace(inp: EmailGenerationInput) -> SimpleNamespace:
         verbose=False,
         research_output=None,
     )
+
+
+def generate_with_trimmed_context(
+    row: dict[str, str],
+    trimmed_news_context: list[dict[str, str]],
+    inp: EmailGenerationInput,
+    *,
+    research_used: bool,
+) -> dict[str, Any]:
+    """Run Ollama after news context is finalised (trimmed). Shared by single and batch flows."""
+    messages = build_email_generation_prompt(row, trimmed_news_context)
+    generation = _ollama_chat(
+        url=_normalise_ollama_chat_url(inp.ollama_url),
+        model=inp.model,
+        messages=messages,
+        timeout_s=int(inp.timeout_s),
+        temperature=float(inp.temperature),
+    )
+    normalised = _normalise_generation_payload(generation)
+    news_summary = news_based_summary_from_context(trimmed_news_context)
+    return {
+        "subject": normalised.get("subject") or "",
+        "email_body": normalised.get("email_body") or "",
+        "pain_point": normalised.get("pain_point") or "",
+        "why_now": normalised.get("why_now") or "",
+        "evidence_used": normalised.get("evidence_used") or "",
+        "offer": normalised.get("offer") or "",
+        "confidence": normalised.get("confidence") or "",
+        "generated_alternatives_json": normalised.get("generated_alternatives_json") or "",
+        "news_context": trimmed_news_context,
+        "news_based_summary": news_summary,
+        "research_used": research_used,
+        "news_context_item_count": len(trimmed_news_context),
+    }
 
 
 def generate_email_draft(inp: EmailGenerationInput) -> dict[str, Any]:
@@ -96,31 +158,48 @@ def generate_email_draft(inp: EmailGenerationInput) -> dict[str, Any]:
             },
         )
 
-    news_context = _trim_news_context(
+    trimmed = _trim_news_context(
         news_context,
         max_items=max(1, inp.context_items),
         snippet_chars=inp.context_snippet_chars,
     )
+    return generate_with_trimmed_context(row, trimmed, inp, research_used=research_used)
 
-    messages = build_email_generation_prompt(row, news_context)
-    generation = _ollama_chat(
-        url=_normalise_ollama_chat_url(inp.ollama_url),
-        model=inp.model,
-        messages=messages,
-        timeout_s=int(inp.timeout_s),
-        temperature=float(inp.temperature),
-    )
-    normalised = _normalise_generation_payload(generation)
+
+def split_full_name(name: str) -> tuple[str, str]:
+    name = (name or "").strip()
+    if not name:
+        return "", ""
+    parts = name.split(None, 1)
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
+def make_prompt_row(
+    *,
+    email: str,
+    first_name: str,
+    last_name: str,
+    company_name: str,
+    position: str = "",
+    industry: str = "",
+) -> dict[str, str]:
+    fn = (first_name or "").strip()
+    ln = (last_name or "").strip()
+    co = (company_name or "").strip()
     return {
-        "subject": normalised.get("subject") or "",
-        "email_body": normalised.get("email_body") or "",
-        "pain_point": normalised.get("pain_point") or "",
-        "why_now": normalised.get("why_now") or "",
-        "evidence_used": normalised.get("evidence_used") or "",
-        "offer": normalised.get("offer") or "",
-        "confidence": normalised.get("confidence") or "",
-        "generated_alternatives_json": normalised.get("generated_alternatives_json") or "",
-        "news_context": news_context,
-        "research_used": research_used,
-        "news_context_item_count": len(news_context),
+        "Email": (email or "").strip(),
+        "First Name": fn,
+        "Last Name": ln,
+        "Company Name": co,
+        "Position": (position or "").strip() or "relevant leader",
+        "Industry": (industry or "").strip(),
     }
+
+
+def company_cache_key(company: str) -> str:
+    text = (company or "").lower()
+    text = text.replace("&", " and ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split()).strip()

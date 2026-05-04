@@ -14,12 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from email_batch import load_rows_from_xlsx, process_batch, rows_to_csv_bytes
 from email_generation import EmailGenerationInput, generate_email_draft
 
 logging.basicConfig(
@@ -335,6 +336,85 @@ async def generate_email(req: GenerateEmailRequest):
     except Exception as exc:
         LOG.exception("Email generation failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/generate-email/batch")
+async def generate_email_batch(
+    file: UploadFile = File(...),
+    model: str = Form("qwen2.5:3b"),
+    ollama_url: str = Form("http://localhost:11434"),
+    temperature: float = Form(0.22),
+    timeout_s: int = Form(420),
+    do_research: str = Form("true"),
+    max_rows: int = Form(40),
+    sleep_ms: int = Form(250),
+    context_items: int = Form(8),
+    context_snippet_chars: int = Form(4000),
+):
+    """
+    Accept a .xlsx with columns such as email, name, company name.
+    Returns a CSV download with subject, body, news based summary, plus any errors per row.
+    Research is cached per company; context limits are raised for richer personalisation.
+    """
+    name = (file.filename or "").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(
+            status_code=400,
+            detail="Upload an Excel workbook (.xlsx or .xlsm).",
+        )
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 25 MB).")
+
+    def load_sheet() -> list[dict[str, Any]]:
+        return load_rows_from_xlsx(raw)
+
+    try:
+        rows = await asyncio.to_thread(load_sheet)
+    except Exception as exc:
+        LOG.exception("Excel read failed")
+        raise HTTPException(status_code=400, detail=f"Could not read spreadsheet: {exc}") from exc
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data rows found under the header row.")
+
+    research_on = (do_research or "").strip().lower() in ("1", "true", "yes", "on")
+
+    base = EmailGenerationInput(
+        company_name="batch",
+        email="",
+        do_research=research_on,
+        ollama_url=(ollama_url or "").strip() or "http://localhost:11434",
+        model=(model or "").strip() or "qwen2.5:3b",
+        temperature=float(temperature),
+        timeout_s=int(timeout_s),
+        context_items=max(3, int(context_items)),
+        context_snippet_chars=max(600, int(context_snippet_chars)),
+        research_limit=14,
+        per_source_limit=10,
+        fetch_page_limit=6,
+    )
+
+    cap = max(1, min(int(max_rows), 200))
+    gap = max(0, int(sleep_ms))
+
+    def run_batch() -> bytes:
+        out_rows, fieldnames = process_batch(rows, base, max_rows=cap, sleep_ms=gap)
+        return rows_to_csv_bytes(out_rows, fieldnames)
+
+    try:
+        csv_bytes = await asyncio.to_thread(run_batch)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        LOG.exception("Batch email generation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="email-campaigns.csv"'},
+    )
 
 
 @app.post("/api/enrich-website")

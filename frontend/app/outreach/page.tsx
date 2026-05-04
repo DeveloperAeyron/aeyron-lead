@@ -46,6 +46,12 @@ export default function OutreachPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EmailDraftResult | null>(null);
 
+  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchMaxRows, setBatchMaxRows] = useState(40);
+  const [batchSkipResearch, setBatchSkipResearch] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -166,6 +172,43 @@ export default function OutreachPage() {
     await copy(block);
   };
 
+  const handleBatchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBatchError(null);
+    if (!batchFile) {
+      setBatchError("Choose an Excel file (.xlsx).");
+      return;
+    }
+    setBatchLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", batchFile);
+      fd.append("max_rows", String(batchMaxRows));
+      fd.append("do_research", batchSkipResearch ? "false" : "true");
+      fd.append("model", model.trim() || "qwen2.5:3b");
+      fd.append("ollama_url", ollamaUrl.trim() || "http://localhost:11434");
+      fd.append("temperature", String(temperature));
+      fd.append("timeout_s", String(timeoutS));
+      const res = await fetch(api.generateEmailBatchUrl, { method: "POST", body: fd });
+      if (!res.ok) {
+        throw new Error(await detailFromResponse(res));
+      }
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = "email-campaigns.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : "Batch generation failed.");
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-8 pb-24">
       <header className="space-y-2">
@@ -176,14 +219,102 @@ export default function OutreachPage() {
           </h1>
         </div>
         <p className="text-sm text-[var(--text-secondary)] max-w-2xl">
-          Enter a <span className="text-[var(--text-primary)]">company name</span> and generate a personalised email
-          campaign. We research the company automatically (same as the backend CLI without{" "}
-          <code className="text-cyan-400/90 text-xs">--no-research</code>), then call your local{" "}
-          <span className="text-[var(--text-primary)]">Ollama</span> model. The first run can take several minutes.
+          Upload an <span className="text-[var(--text-primary)]">Excel</span> list of contacts, or enter one company
+          below. Research pulls extra context for more personalised copy; batch runs use richer snippet limits and cache
+          research per company. Local <span className="text-[var(--text-primary)]">Ollama</span> is required.
         </p>
       </header>
 
+      <form onSubmit={handleBatchSubmit} className="glass-card rounded-2xl p-6 md:p-8 space-y-5 border border-teal-500/20">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/15 text-teal-400">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v12"
+              />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Spreadsheet batch</h2>
+            <p className="text-xs text-[var(--text-secondary)]">
+              Columns: <span className="text-[var(--text-primary)]">email</span>,{" "}
+              <span className="text-[var(--text-primary)]">name</span>,{" "}
+              <span className="text-[var(--text-primary)]">company name</span> (header names are matched flexibly).
+              Download is a CSV with <span className="text-[var(--text-primary)]">subject</span>,{" "}
+              <span className="text-[var(--text-primary)]">body</span>, and{" "}
+              <span className="text-[var(--text-primary)]">news based summary</span> appended, plus any original columns.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+            Excel workbook (.xlsx)
+          </label>
+          <input
+            type="file"
+            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => setBatchFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-[var(--text-secondary)] file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-teal-500/20 file:text-teal-200"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
+              Max rows
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={batchMaxRows}
+              onChange={(e) => setBatchMaxRows(parseInt(e.target.value, 10) || 40)}
+              className="input-field"
+            />
+          </div>
+          <div className="sm:col-span-2 flex items-end">
+            <label className="flex items-center gap-3 cursor-pointer text-sm text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={batchSkipResearch}
+                onChange={(e) => setBatchSkipResearch(e.target.checked)}
+                className="rounded border-[var(--border-subtle)]"
+              />
+              Skip company research (faster; less personalisation)
+            </label>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-[var(--text-secondary)]">
+          Batch mode uses wider research context (more snippets, longer excerpts) than single-row mode. Duplicate
+          companies in the sheet reuse one research pass per run.
+        </p>
+
+        {batchError && (
+          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">{batchError}</div>
+        )}
+
+        <button
+          type="submit"
+          disabled={batchLoading || !batchFile}
+          className="w-full py-3 rounded-xl font-semibold text-sm bg-gradient-to-r from-teal-700 to-cyan-700 hover:from-teal-600 hover:to-cyan-600 text-white shadow-lg shadow-teal-500/15 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+        >
+          {batchLoading ? (
+            <span className="inline-flex items-center justify-center gap-2">
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Processing sheet — this can take a long time
+            </span>
+          ) : (
+            "Generate CSV with email campaigns"
+          )}
+        </button>
+      </form>
+
       <form onSubmit={handleGenerate} className="glass-card rounded-2xl p-6 md:p-8 space-y-6">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wider">Single company</h2>
         <div className="space-y-2">
           <label htmlFor="company" className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
             Company name
@@ -472,6 +603,26 @@ export default function OutreachPage() {
                 {result.email_body || "—"}
               </pre>
             </div>
+
+            {result.news_based_summary?.trim() ? (
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
+                    News based summary
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copy(result.news_based_summary ?? "")}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre className="whitespace-pre-wrap text-xs text-[var(--text-secondary)] bg-black/15 rounded-xl p-4 border border-[var(--border-subtle)] max-h-48 overflow-y-auto scrollbar-thin">
+                  {result.news_based_summary}
+                </pre>
+              </div>
+            ) : null}
 
             {(result.pain_point || result.evidence_used || result.offer || result.why_now) ? (
               <details className="text-sm text-[var(--text-secondary)] group">
