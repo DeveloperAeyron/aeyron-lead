@@ -115,7 +115,11 @@ export default function LeadHuntPage() {
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <header className="flex flex-col gap-1 mb-2">
           <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">Lead Hunt</h1>
-          <p className="text-[var(--text-secondary)] text-sm">Start a new discovery session to find leads in real-time.</p>
+          <p className="text-[var(--text-secondary)] text-sm">
+            Start a new discovery session to find leads in real-time. Use{" "}
+            <span className="text-[var(--text-primary)]">Email campaigns</span> in the sidebar or below the export row to
+            draft outreach from these leads.
+          </p>
         </header>
 
         <ControlPanel onStart={handleStart} onStop={handleStop} isRunning={status === "running"} />

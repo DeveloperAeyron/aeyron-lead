@@ -9,13 +9,22 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const navItems = [
+  const coreNavItems = [
     {
       name: "Lead Hunt",
       href: "/leadhunt",
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      ),
+    },
+    {
+      name: "Email campaigns",
+      href: "/outreach",
+      icon: (
+        <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
         </svg>
       ),
     },
@@ -28,6 +37,9 @@ export default function Sidebar() {
         </svg>
       ),
     },
+  ];
+
+  const advancedNavItems = [
     {
       name: "Lead Enrichment",
       href: "/enrichment",
@@ -52,15 +64,6 @@ export default function Sidebar() {
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
-        </svg>
-      ),
-    },
-    {
-      name: "Campaign Builder",
-      href: "/outreach",
-      icon: (
-        <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
         </svg>
       ),
     },
@@ -120,7 +123,7 @@ export default function Sidebar() {
             </p>
           )}
           <div className="space-y-1">
-            {navItems.slice(0, 2).map((item) => {
+            {coreNavItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link
@@ -156,7 +159,7 @@ export default function Sidebar() {
           )}
           {isCollapsed && <div className="h-px bg-white/5 mx-2 my-4" />}
           <div className="space-y-1">
-            {navItems.slice(2).map((item) => {
+            {advancedNavItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link

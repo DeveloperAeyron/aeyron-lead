@@ -4,7 +4,9 @@ export const api = {
   scrapeUrl: `${API_BASE}/api/scrape`,
   stopUrl: `${API_BASE}/api/stop`,
   exportUrl: (sessionId: string) => `${API_BASE}/api/export/${sessionId}`,
+  sessionsUrl: `${API_BASE}/api/sessions`,
   sessionLeadsUrl: (sessionId: string) => `${API_BASE}/api/sessions/${sessionId}/leads`,
   enrichUrl: `${API_BASE}/api/enrich-website`,
+  generateEmailUrl: `${API_BASE}/api/generate-email`,
   healthUrl: `${API_BASE}/api/health`,
 };

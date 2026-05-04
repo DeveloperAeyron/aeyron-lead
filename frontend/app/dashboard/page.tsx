@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Lead } from "@/lib/types";
 import LeadTable from "@/components/LeadTable";
@@ -21,7 +22,7 @@ export default function DashboardPage() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch(`${api.scrapeUrl.replace("/scrape", "/sessions")}`);
+      const res = await fetch(api.sessionsUrl);
       if (res.ok) {
         const data = await res.json();
         setSessions(data);
@@ -70,7 +71,13 @@ export default function DashboardPage() {
       <div className="relative z-10 max-w-7xl mx-auto space-y-8">
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">Dashboard</h1>
-          <p className="text-[var(--text-secondary)] text-sm mt-1">Overview of all past scraping sessions and discovered leads.</p>
+          <p className="text-[var(--text-secondary)] text-sm mt-1">
+            Overview of all past scraping sessions and discovered leads.{" "}
+            <Link href="/outreach" className="text-teal-400 hover:text-teal-300 font-medium">
+              Email campaigns
+            </Link>
+            {" — "}generate drafts from saved sessions.
+          </p>
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

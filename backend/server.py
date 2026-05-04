@@ -12,13 +12,15 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+
+from email_generation import EmailGenerationInput, generate_email_draft
 
 logging.basicConfig(
     level=logging.INFO,
@@ -274,6 +276,66 @@ _SOCIAL_PATTERNS = {
 
 class EnrichRequest(BaseModel):
     url: str
+
+
+class GenerateEmailRequest(BaseModel):
+    company_name: str
+    email: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    position: str = ""
+    industry: str = ""
+    news_report: Optional[dict[str, Any]] = None
+    additional_context: str = ""
+    do_research: bool = True
+    ollama_url: str = "http://localhost:11434"
+    model: str = "qwen2.5:3b"
+    temperature: float = 0.25
+    timeout_s: int = 300
+    context_items: int = 5
+    context_snippet_chars: int = 2800
+    research_limit: int = 12
+    per_source_limit: int = 8
+    fetch_page_limit: int = 5
+    no_fetch_pages: bool = False
+    no_linkedin: bool = False
+    headed: bool = False
+
+
+@app.post("/api/generate-email")
+async def generate_email(req: GenerateEmailRequest):
+    """Generate a personalised outreach draft via local Ollama (same pipeline as the CLI)."""
+    inp = EmailGenerationInput(
+        company_name=req.company_name.strip(),
+        email=req.email.strip(),
+        first_name=req.first_name.strip(),
+        last_name=req.last_name.strip(),
+        position=req.position.strip(),
+        industry=req.industry.strip(),
+        news_report=req.news_report,
+        additional_context=req.additional_context.strip(),
+        do_research=req.do_research,
+        ollama_url=req.ollama_url.strip() or "http://localhost:11434",
+        model=req.model.strip() or "qwen2.5:3b",
+        temperature=req.temperature,
+        timeout_s=req.timeout_s,
+        context_items=req.context_items,
+        context_snippet_chars=req.context_snippet_chars,
+        research_limit=req.research_limit,
+        per_source_limit=req.per_source_limit,
+        fetch_page_limit=req.fetch_page_limit,
+        no_fetch_pages=req.no_fetch_pages,
+        no_linkedin=req.no_linkedin,
+        headed=req.headed,
+    )
+    try:
+        return await asyncio.to_thread(generate_email_draft, inp)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        LOG.exception("Email generation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
 
 @app.post("/api/enrich-website")
 async def enrich_website(req: EnrichRequest):

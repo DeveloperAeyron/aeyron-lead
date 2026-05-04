@@ -41,6 +41,21 @@ export interface ScrapeConfig {
 
 export type ScrapeStatus = "idle" | "running" | "complete" | "error" | "stopped";
 
+/** Response from POST /api/generate-email */
+export interface GeneratedEmailResult {
+  subject: string;
+  email_body: string;
+  pain_point: string;
+  why_now: string;
+  evidence_used: string;
+  offer: string;
+  confidence: string;
+  generated_alternatives_json: string;
+  news_context: { title: string; snippet: string; url: string }[];
+  research_used: boolean;
+  news_context_item_count: number;
+}
+
 export const DEFAULT_CONFIG: ScrapeConfig = {
   query: "car wash",
   location: "Delaware",
@@ -53,3 +68,24 @@ export const DEFAULT_CONFIG: ScrapeConfig = {
   per_seed_keep_cap: 10,
   zoom: 15,
 };
+
+/** Response from POST /api/generate-email */
+export interface EmailDraftResult {
+  subject: string;
+  email_body: string;
+  pain_point: string;
+  why_now: string;
+  evidence_used: string;
+  offer: string;
+  confidence: string;
+  generated_alternatives_json: string;
+  news_context: { title: string; snippet: string; url: string }[];
+  research_used: boolean;
+  news_context_item_count: number;
+}
+
+export interface SessionListItem {
+  session_id: string;
+  has_xlsx: boolean;
+  lead_count: number;
+}
