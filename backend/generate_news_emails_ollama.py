@@ -10,7 +10,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -66,6 +66,19 @@ LEGAL_SUFFIXES = {
 def _log(enabled: bool, message: str) -> None:
     if enabled:
         print(message, file=sys.stderr, flush=True)
+
+
+def _log_ollama_prompt(enabled: bool, messages: Sequence[Mapping[str, Any]]) -> None:
+    """Print the exact chat payload sent to Ollama (stderr) when verbose is enabled."""
+    if not enabled:
+        return
+    print("\n--- Ollama messages (prompt) ---", file=sys.stderr, flush=True)
+    for msg in messages:
+        role = str(msg.get("role") or "?")
+        content = str(msg.get("content") or "")
+        print(f"\n[{role.upper()}]", file=sys.stderr, flush=True)
+        print(content, file=sys.stderr, flush=True)
+    print("\n--- end Ollama messages ---\n", file=sys.stderr, flush=True)
 
 
 def _clean(value: Any, *, max_chars: int = 1_500) -> str:
@@ -502,6 +515,7 @@ def _run_single_company(args: argparse.Namespace) -> int:
     )
     row = _single_company_row(args)
     messages = build_email_generation_prompt(row, news_context)
+    _log_ollama_prompt(args.verbose, messages)
     _log(
         args.verbose,
         f"Generating email with Ollama model {args.model} using {len(news_context)} context item(s)...",
@@ -573,6 +587,7 @@ def _run_batch_csv(args: argparse.Namespace) -> int:
 
         try:
             messages = build_email_generation_prompt(row, news_context)
+            _log_ollama_prompt(args.verbose, messages)
             generation = _ollama_chat(
                 url=chat_url,
                 model=args.model,
