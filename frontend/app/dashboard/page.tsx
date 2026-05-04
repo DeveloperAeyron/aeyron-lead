@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, withApiHeaders } from "@/lib/api";
 import { Lead } from "@/lib/types";
 import LeadTable from "@/components/LeadTable";
 import ExportBar from "@/components/ExportBar";
@@ -22,7 +22,7 @@ export default function DashboardPage() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch(api.sessionsUrl);
+      const res = await fetch(api.sessionsUrl, withApiHeaders());
       if (res.ok) {
         const data = await res.json();
         setSessions(data);
@@ -50,7 +50,7 @@ export default function DashboardPage() {
     setSessionLeads([]);
 
     try {
-      const res = await fetch(api.sessionLeadsUrl(sessionId));
+      const res = await fetch(api.sessionLeadsUrl(sessionId), withApiHeaders());
       if (res.ok) {
         const data = await res.json();
         setSessionLeads(data);

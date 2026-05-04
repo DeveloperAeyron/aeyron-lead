@@ -7,7 +7,7 @@ import LeadTable from "@/components/LeadTable";
 import ExportBar from "@/components/ExportBar";
 import LogPanel from "@/components/LogPanel";
 import { Lead, ScrapeConfig, ScrapeStatus } from "@/lib/types";
-import { api } from "@/lib/api";
+import { api, withApiHeaders } from "@/lib/api";
 
 export default function LeadHuntPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -29,12 +29,15 @@ export default function LeadHuntPage() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch(api.scrapeUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-        signal: controller.signal,
-      });
+      const res = await fetch(
+        api.scrapeUrl,
+        withApiHeaders({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(config),
+          signal: controller.signal,
+        }),
+      );
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -105,7 +108,7 @@ export default function LeadHuntPage() {
   const handleStop = useCallback(async () => {
     abortRef.current?.abort();
     try {
-      await fetch(api.stopUrl, { method: "POST" });
+      await fetch(api.stopUrl, withApiHeaders({ method: "POST" }));
     } catch { /* best effort */ }
     setStatus("stopped");
   }, []);

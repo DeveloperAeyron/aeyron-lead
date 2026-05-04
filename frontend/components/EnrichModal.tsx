@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, withApiHeaders } from "@/lib/api";
 
 interface EnrichResult {
   emails: string[];
@@ -37,11 +37,14 @@ export default function EnrichModal({ websiteUrl, leadName, onClose }: EnrichMod
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(api.enrichUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: websiteUrl }),
-        });
+        const res = await fetch(
+          api.enrichUrl,
+          withApiHeaders({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: websiteUrl }),
+          }),
+        );
         const data = await res.json();
         if (cancelled) return;
         if (data.error) setError(data.error);

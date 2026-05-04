@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, withApiHeaders } from "@/lib/api";
 import { EmailDraftResult, Lead, SessionListItem } from "@/lib/types";
 
 async function detailFromResponse(res: Response): Promise<string> {
@@ -57,7 +57,7 @@ export default function OutreachPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(api.sessionsUrl);
+        const res = await fetch(api.sessionsUrl, withApiHeaders());
         if (!res.ok || cancelled) return;
         const list = (await res.json()) as SessionListItem[];
         if (!cancelled) setSessions(Array.isArray(list) ? list : []);
@@ -75,7 +75,7 @@ export default function OutreachPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(api.sessionLeadsUrl(sessionId));
+        const res = await fetch(api.sessionLeadsUrl(sessionId), withApiHeaders());
         if (!res.ok || cancelled) return;
         const leads = (await res.json()) as Lead[];
         if (!cancelled) {
@@ -144,11 +144,14 @@ export default function OutreachPage() {
         temperature,
         timeout_s: timeoutS,
       };
-      const res = await fetch(api.generateEmailUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch(
+        api.generateEmailUrl,
+        withApiHeaders({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
       if (!res.ok) {
         throw new Error(await detailFromResponse(res));
       }
@@ -192,7 +195,7 @@ export default function OutreachPage() {
       fd.append("ollama_url", ollamaUrl.trim() || "http://localhost:11434");
       fd.append("temperature", String(temperature));
       fd.append("timeout_s", String(timeoutS));
-      const res = await fetch(api.generateEmailBatchUrl, { method: "POST", body: fd });
+      const res = await fetch(api.generateEmailBatchUrl, withApiHeaders({ method: "POST", body: fd }));
       if (!res.ok) {
         throw new Error(await detailFromResponse(res));
       }
