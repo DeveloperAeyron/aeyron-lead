@@ -203,11 +203,16 @@ def _result_to_context(item: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _company_report_context(report: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Unpack research JSON into context blobs for the email model.
+
+    Limits are deliberately generous here; downstream `_trim_news_context` caps what Ollama sees.
+    Company summary alone was previously truncated to 700 chars, which hides most scraped detail.
+    """
     context: list[dict[str, str]] = []
 
     summary = report.get("summary")
     if summary:
-        context.append({"title": "Company summary", "snippet": _clean(summary, max_chars=700), "url": ""})
+        context.append({"title": "Company summary", "snippet": _clean(summary, max_chars=5_500), "url": ""})
 
     insights = report.get("insights")
     if isinstance(insights, Mapping):
@@ -215,13 +220,13 @@ def _company_report_context(report: Mapping[str, Any]) -> list[dict[str, str]]:
             items = insights.get(key)
             if not isinstance(items, list):
                 continue
-            for item in items[:4]:
+            for item in items[:8]:
                 if isinstance(item, Mapping):
                     context.append(_result_to_context(item))
 
     results = report.get("results")
     if isinstance(results, list):
-        for item in results[:8]:
+        for item in results[:18]:
             if isinstance(item, Mapping):
                 context.append(_result_to_context(item))
 
@@ -234,7 +239,7 @@ def _company_report_context(report: Mapping[str, Any]) -> list[dict[str, str]]:
         seen.add(key)
         if item.get("title") or item.get("snippet"):
             deduped.append(item)
-    return deduped[:10]
+    return deduped[:22]
 
 
 def _trim_news_context(

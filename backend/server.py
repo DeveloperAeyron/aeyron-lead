@@ -288,16 +288,17 @@ class GenerateEmailRequest(BaseModel):
     industry: str = ""
     news_report: Optional[dict[str, Any]] = None
     additional_context: str = ""
+    website_url: str = ""
     do_research: bool = True
     ollama_url: str = "http://localhost:11434"
     model: str = "qwen2.5:3b"
     temperature: float = 0.25
     timeout_s: int = 300
-    context_items: int = 5
-    context_snippet_chars: int = 2800
+    context_items: int = 8
+    context_snippet_chars: int = 3800
     research_limit: int = 12
     per_source_limit: int = 8
-    fetch_page_limit: int = 5
+    fetch_page_limit: int = 8
     no_fetch_pages: bool = False
     no_linkedin: bool = False
     headed: bool = False
@@ -315,6 +316,7 @@ async def generate_email(req: GenerateEmailRequest):
         industry=req.industry.strip(),
         news_report=req.news_report,
         additional_context=req.additional_context.strip(),
+        website_url=req.website_url.strip(),
         do_research=req.do_research,
         ollama_url=req.ollama_url.strip() or "http://localhost:11434",
         model=req.model.strip() or "qwen2.5:3b",
@@ -348,8 +350,8 @@ async def generate_email_batch(
     do_research: str = Form("true"),
     max_rows: int = Form(40),
     sleep_ms: int = Form(250),
-    context_items: int = Form(8),
-    context_snippet_chars: int = Form(4000),
+    context_items: int = Form(12),
+    context_snippet_chars: int = Form(5200),
 ):
     """
     Accept .csv, .xlsx, or .xlsm with columns such as email, name (or first/last name), company name.
@@ -394,7 +396,7 @@ async def generate_email_batch(
         context_snippet_chars=max(600, int(context_snippet_chars)),
         research_limit=14,
         per_source_limit=10,
-        fetch_page_limit=6,
+        fetch_page_limit=10,
     )
 
     cap = max(1, min(int(max_rows), 200))

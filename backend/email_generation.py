@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from prompt import build_email_generation_prompt
 
@@ -23,7 +25,7 @@ from generate_news_emails_ollama import (
 def news_based_summary_from_context(
     items: Sequence[Mapping[str, str]],
     *,
-    max_chars: int = 12_000,
+    max_chars: int = 24_000,
 ) -> str:
     """Readable summary of research snippets sent to the model (for CSV export)."""
     blocks: list[str] = []
@@ -70,6 +72,65 @@ class EmailGenerationInput:
     no_fetch_pages: bool = False
     no_linkedin: bool = False
     headed: bool = False
+    website_url: str = ""
+
+
+def fetch_website_plain_text(
+    url: str,
+    *,
+    timeout_s: int = 20,
+    max_bytes: int = 1_500_000,
+    max_chars: int = 12_000,
+) -> str:
+    """Lightweight HTTP fetch + tag strip. Many corporate sites still need Playwright; this covers simple cases."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if not raw.startswith(("http://", "https://")):
+        raw = "https://" + raw
+    try:
+        req = Request(
+            raw,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-GB,en;q=0.9",
+            },
+        )
+        with urlopen(req, timeout=timeout_s) as resp:
+            html = resp.read(max_bytes).decode("utf-8", errors="replace")
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        return ""
+
+    html = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html)
+    html = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", html)
+    html = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", html).strip()
+    return text[:max_chars]
+
+
+def prepend_prospect_website_block(news_context: list[dict[str, str]], website_url: str) -> None:
+    """Inline homepage copy when callers pass a prospect website URL (spreadsheet column or API field)."""
+    u = (website_url or "").strip()
+    if not u:
+        return
+    canon = u if u.startswith(("http://", "https://")) else f"https://{u}"
+    body = fetch_website_plain_text(canon)
+    news_context.insert(
+        0,
+        {
+            "title": "Prospect website (from your spreadsheet or form)",
+            "snippet": (
+                body
+                if body
+                else "(No readable body returned — site may block simple fetches or need JavaScript. URL is still attached.)"
+            ),
+            "url": canon,
+        },
+    )
 
 
 def _research_namespace(inp: EmailGenerationInput) -> SimpleNamespace:
@@ -157,6 +218,8 @@ def generate_email_draft(inp: EmailGenerationInput) -> dict[str, Any]:
                 "url": "",
             },
         )
+
+    prepend_prospect_website_block(news_context, inp.website_url)
 
     trimmed = _trim_news_context(
         news_context,

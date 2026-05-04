@@ -15,6 +15,7 @@ from email_generation import (
     company_cache_key,
     generate_with_trimmed_context,
     make_prompt_row,
+    prepend_prospect_website_block,
     split_full_name,
 )
 from generate_news_emails_ollama import (
@@ -38,6 +39,7 @@ _COMPANY_KEYS = (
 )
 _POSITION_KEYS = ("position", "title", "job title", "role")
 _INDUSTRY_KEYS = ("industry", "sector", "vertical")
+_WEBSITE_KEYS = ("website", "web site", "company website", "company url", "domain", "site")
 
 
 def _norm_header(h: str) -> str:
@@ -201,6 +203,8 @@ def process_batch(
                     research_used = True
                 else:
                     raw_news = []
+
+            prepend_prospect_website_block(raw_news, _pick_field(raw, _WEBSITE_KEYS))
 
             trimmed = _trim_news_context(
                 raw_news,

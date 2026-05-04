@@ -29,6 +29,7 @@ export default function OutreachPage() {
   const [email, setEmail] = useState("");
   const [position, setPosition] = useState("");
   const [industry, setIndustry] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
   const [newsJson, setNewsJson] = useState("");
   const [showOllama, setShowOllama] = useState(false);
@@ -97,6 +98,7 @@ export default function OutreachPage() {
     setFirstName("");
     setLastName("");
     setEmail(lead.email?.trim() || "");
+    setWebsiteUrl(lead.website?.trim() || "");
     setPosition("");
     setIndustry("");
     setLeadIndex(String(idx));
@@ -133,6 +135,7 @@ export default function OutreachPage() {
         last_name: lastName.trim(),
         position: position.trim(),
         industry: industry.trim(),
+        website_url: websiteUrl.trim(),
         news_report: newsReport,
         additional_context: additionalContext.trim(),
         do_research: newsReport ? false : doResearch,
@@ -241,7 +244,8 @@ export default function OutreachPage() {
             <p className="text-xs text-[var(--text-secondary)]">
               Columns: <span className="text-[var(--text-primary)]">email</span>,{" "}
               <span className="text-[var(--text-primary)]">name</span>,{" "}
-              <span className="text-[var(--text-primary)]">company name</span> (header names are matched flexibly).
+              <span className="text-[var(--text-primary)]">company name</span> (matched flexibly). Optional{" "}
+              <span className="text-[var(--text-primary)]">website</span> adds a fetched homepage excerpt ahead of SERP research.
               Download is a CSV with <span className="text-[var(--text-primary)]">subject</span>,{" "}
               <span className="text-[var(--text-primary)]">body</span>, and{" "}
               <span className="text-[var(--text-primary)]">news based summary</span> appended, plus any original columns.
@@ -454,6 +458,22 @@ export default function OutreachPage() {
                   Industry
                 </label>
                 <input value={industry} onChange={(e) => setIndustry(e.target.value)} className="input-field" />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-[10px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
+                  Company website (optional)
+                </label>
+                <input
+                  type="url"
+                  value={websiteUrl}
+                  onChange={(e) => setWebsiteUrl(e.target.value)}
+                  className="input-field font-mono text-sm"
+                  placeholder="https://…"
+                  inputMode="url"
+                />
+                <p className="text-[11px] text-[var(--text-secondary)]">
+                  Plain HTTP fetch plus tag stripping; SPA-heavy sites may still rely on SERP fetch-pages research.
+                </p>
               </div>
             </div>
 

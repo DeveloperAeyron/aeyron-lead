@@ -177,7 +177,7 @@ def _format_news_context(news_context: Sequence[Mapping[str, Any]] | Mapping[str
         return blob[:24_000] if len(blob) > 24_000 else blob
 
     bullets = []
-    for item in news_context[:8]:
+    for item in news_context[:14]:
         if not isinstance(item, Mapping):
             continue
         title = _clean(item.get("title") or item.get("summary") or item.get("theme"), max_chars=220)
