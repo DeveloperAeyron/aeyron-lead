@@ -1,5 +1,8 @@
+"use client";
+
 import { Lead } from "@/lib/types";
 import { api } from "@/lib/api";
+import Link from "next/link";
 import { useState } from "react";
 import * as XLSX from "xlsx";
 
@@ -116,7 +119,18 @@ export default function ExportBar({ leads, sessionId, isRunning }: ExportBarProp
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/outreach"
+            className="btn-secondary !py-2 !px-4 text-xs font-bold inline-flex items-center gap-2 border border-teal-500/30 hover:border-teal-400/50 hover:bg-teal-500/10"
+            title="Generate AI email drafts from leads or company research"
+          >
+            <svg className="w-3.5 h-3.5 text-teal-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+            </svg>
+            Email campaigns
+          </Link>
+
           <button
             onClick={handleClientExport}
             disabled={leads.length === 0}
