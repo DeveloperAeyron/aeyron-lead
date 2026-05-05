@@ -52,6 +52,7 @@ export default function OutreachPage() {
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchMaxRows, setBatchMaxRows] = useState(40);
   const [batchSkipResearch, setBatchSkipResearch] = useState(false);
+  const [batchConcurrency, setBatchConcurrency] = useState(4);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,6 +191,7 @@ export default function OutreachPage() {
       const fd = new FormData();
       fd.append("file", batchFile);
       fd.append("max_rows", String(batchMaxRows));
+      fd.append("concurrency", String(batchConcurrency));
       fd.append("do_research", batchSkipResearch ? "false" : "true");
       fd.append("model", model.trim() || "qwen2.5:3b");
       fd.append("ollama_url", ollamaUrl.trim() || "http://localhost:11434");
@@ -279,6 +281,19 @@ export default function OutreachPage() {
               max={200}
               value={batchMaxRows}
               onChange={(e) => setBatchMaxRows(parseInt(e.target.value, 10) || 40)}
+              className="input-field"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
+              Concurrency
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={32}
+              value={batchConcurrency}
+              onChange={(e) => setBatchConcurrency(parseInt(e.target.value, 10) || 4)}
               className="input-field"
             />
           </div>

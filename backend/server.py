@@ -367,6 +367,7 @@ async def generate_email_batch(
     do_research: str = Form("true"),
     max_rows: int = Form(40),
     sleep_ms: int = Form(250),
+    concurrency: int = Form(4),
     context_items: int = Form(12),
     context_snippet_chars: int = Form(5200),
 ):
@@ -418,9 +419,10 @@ async def generate_email_batch(
 
     cap = max(1, min(int(max_rows), 200))
     gap = max(0, int(sleep_ms))
+    conc = max(1, min(int(concurrency), 32))
 
     def run_batch() -> bytes:
-        out_rows, fieldnames = process_batch(rows, base, max_rows=cap, sleep_ms=gap)
+        out_rows, fieldnames = process_batch(rows, base, max_rows=cap, sleep_ms=gap, concurrency=conc)
         return rows_to_csv_bytes(out_rows, fieldnames)
 
     try:
