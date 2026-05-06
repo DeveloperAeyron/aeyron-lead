@@ -31,5 +31,7 @@ export const api = {
   enrichUrl: `${API_BASE}/api/enrich-website`,
   generateEmailUrl: `${API_BASE}/api/generate-email`,
   generateEmailBatchUrl: `${API_BASE}/api/generate-email/batch`,
+  promptsUrl: `${API_BASE}/api/prompts`,
+  promptsResetUrl: `${API_BASE}/api/prompts/reset`,
   healthUrl: `${API_BASE}/api/health`,
 };

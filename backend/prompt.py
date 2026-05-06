@@ -2,10 +2,32 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
-PRODUCT_PORTFOLIO = """
+# ── Persistence ────────────────────────────────────────────────────────
+_PROMPTS_FILE = Path(__file__).resolve().parent / "prompts_override.json"
+
+
+def _load_overrides() -> dict[str, str]:
+    """Load user-edited prompt sections from disk (empty dict if no file)."""
+    if _PROMPTS_FILE.exists():
+        try:
+            return json.loads(_PROMPTS_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_prompts(sections: dict[str, str]) -> None:
+    """Persist prompt section overrides to disk."""
+    _PROMPTS_FILE.write_text(json.dumps(sections, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ── Default prompt sections ────────────────────────────────────────────
+
+_DEFAULT_PRODUCT_PORTFOLIO = """
 AEYRON PRODUCT PORTFOLIO (use at most ONE per email, only if it fits naturally)
 
 1. Legisys — OCR plus semantic search for scanned legal and compliance documents.
@@ -41,7 +63,7 @@ If no product is a clear fit, do NOT force one. Reference Aeyron's general capab
 """.strip()
 
 
-NON_NEGOTIABLE_RULES = """
+_DEFAULT_NON_NEGOTIABLE_RULES = """
 1. Subject line: 5–9 words, specific to the role or company, no hype words
    (unlock, revolutionise, game-changer, transform).
 
@@ -81,11 +103,11 @@ NON_NEGOTIABLE_RULES = """
 SPAM TRIGGER WORDS TO AVOID
 
 Free, guarantee, earn money, winner, urgent, act now, limited time, click here,
-unsubscribe, congratulations, offer.
+    unsubscribe, congratulations, offer.
 """.strip()
 
 
-TONE_ANCHOR = """
+_DEFAULT_TONE_ANCHOR = """
 SHORT SHAPE EXAMPLE (fictional prospect — imitate structure, not wording)
 
 Subject: Compliance filings and slow document retrieval
@@ -105,6 +127,31 @@ Happy to share more if this is on your radar.
 
 Best regards,
 """.strip()
+
+
+def get_prompt_sections() -> dict[str, str]:
+    """Return the active prompt sections (overrides take precedence over defaults)."""
+    overrides = _load_overrides()
+    return {
+        "product_portfolio": overrides.get("product_portfolio", _DEFAULT_PRODUCT_PORTFOLIO),
+        "non_negotiable_rules": overrides.get("non_negotiable_rules", _DEFAULT_NON_NEGOTIABLE_RULES),
+        "tone_anchor": overrides.get("tone_anchor", _DEFAULT_TONE_ANCHOR),
+    }
+
+
+def get_default_prompt_sections() -> dict[str, str]:
+    """Return the hardcoded default prompt sections (ignoring overrides)."""
+    return {
+        "product_portfolio": _DEFAULT_PRODUCT_PORTFOLIO,
+        "non_negotiable_rules": _DEFAULT_NON_NEGOTIABLE_RULES,
+        "tone_anchor": _DEFAULT_TONE_ANCHOR,
+    }
+
+
+# Keep module-level aliases for any legacy imports
+PRODUCT_PORTFOLIO = _DEFAULT_PRODUCT_PORTFOLIO
+NON_NEGOTIABLE_RULES = _DEFAULT_NON_NEGOTIABLE_RULES
+TONE_ANCHOR = _DEFAULT_TONE_ANCHOR
 
 
 # Prefer fetched page text over SERP snippets when building Ollama context.
@@ -203,6 +250,9 @@ def _format_news_context(news_context: Sequence[Mapping[str, Any]] | Mapping[str
 def build_email_generation_prompt(
     row: Mapping[str, Any],
     news_context: Sequence[Mapping[str, Any]] | Mapping[str, Any] | str | None = None,
+    *,
+    website_url: str = "",
+    additional_context: str = "",
 ) -> list[dict[str, str]]:
     """Build Ollama chat messages for personalised email generation.
 
@@ -217,6 +267,8 @@ def build_email_generation_prompt(
     email = _row_value(row, "Email", "email_address")
     industry = _row_value(row, "Industry", "industry", "sector", "vertical")
 
+    sections = get_prompt_sections()
+
     system_prompt = f"""You are a senior B2B cold email copywriter for Aeyron — a software
 development agency that builds AI automation, document intelligence, custom web and mobile
 applications, workflow automation, dashboards, cloud infrastructure, IoT, and computer vision
@@ -228,13 +280,13 @@ controlled variations for testing.
 
 Write in British English (UK spelling and phrasing).
 
-{PRODUCT_PORTFOLIO}
+{sections["product_portfolio"]}
 
 RULES (non-negotiable)
-{NON_NEGOTIABLE_RULES}
+{sections["non_negotiable_rules"]}
 
 TONE ANCHOR (structure only)
-{TONE_ANCHOR}
+{sections["tone_anchor"]}
 
 OUTPUT FORMAT
 
@@ -244,22 +296,47 @@ Return strict JSON only (no markdown fences). Match this shape — keys and nest
 The email bodies inside primary_email and the two variations must each obey all rules above.
 subject_lines must contain exactly five strings."""
 
+    # Build the prospect details block
+    prospect_lines = [
+        f"- First name:    {first_name or 'unknown'}",
+        f"- Last name:     {last_name or 'unknown'}",
+        f"- Company:       {company or 'unknown'}",
+        f"- Position/role: {position or 'unknown'}",
+        f"- Industry:      {industry or 'unknown'}",
+        f"- Email:         {email or 'unknown'}",
+    ]
+    if website_url.strip():
+        prospect_lines.append(f"- Website:       {website_url.strip()}")
+
+    prospect_block = "\n".join(prospect_lines)
+
+    # Build additional context block (user-provided notes — high priority)
+    additional_block = ""
+    extra = (additional_context or "").strip()
+    if extra:
+        additional_block = f"""
+
+USER-PROVIDED NOTES (treat as high-priority personalisation signals — use these
+observations to shape your angle, opener, or pain point):
+{extra}"""
+
     user_prompt = f"""Generate the JSON package for this prospect.
 
-- First name:    {first_name or "unknown"}
-- Last name:     {last_name or "unknown"}
-- Company:       {company or "unknown"}
-- Position/role: {position or "unknown"}
-- Industry:      {industry or "unknown"}
-- Email:         {email or "unknown"}
+PROSPECT DETAILS
+{prospect_block}
+{additional_block}
 
-Company and news context (use if relevant; if weak, prefer cautious phrasing and
-"teams like yours" rather than inventing facts):
+RESEARCHED COMPANY & NEWS CONTEXT (use the most relevant details; if context is weak
+or generic, prefer cautious phrasing and "teams like yours" rather than inventing facts):
 {_format_news_context(news_context)}
 
-Match at most one product from the portfolio to the pain point. If nothing fits cleanly,
-use general capability only. Never reference scraping, AI prompts, models, or datasets in
-the email text itself."""
+INSTRUCTIONS
+- Use the prospect details and any context above to personalise the opener and pain point.
+- If a website snippet or news item reveals a specific challenge, reference it concretely.
+- Match at most one product from the portfolio to the pain point. If nothing fits cleanly,
+  use general capability only.
+- Never reference scraping, AI prompts, models, or datasets in the email text itself.
+- Address the prospect by first name in the greeting (use "Hi [First Name],")."""
 
     return [
         {"role": "system", "content": system_prompt},

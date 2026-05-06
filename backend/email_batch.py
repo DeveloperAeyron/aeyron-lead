@@ -226,14 +226,19 @@ def process_batch(
                 else:
                     raw_news = []
 
-            prepend_prospect_website_block(raw_news, _pick_field(raw, _WEBSITE_KEYS))
+            row_website = _pick_field(raw, _WEBSITE_KEYS)
+            prepend_prospect_website_block(raw_news, row_website)
 
             trimmed = _trim_news_context(
                 raw_news,
                 max_items=max(1, base.context_items),
                 snippet_chars=base.context_snippet_chars,
             )
-            result = generate_with_trimmed_context(row_dict, trimmed, base, research_used=research_used)
+            result = generate_with_trimmed_context(
+                row_dict, trimmed, base,
+                research_used=research_used,
+                website_url_override=row_website,
+            )
             line_out["subject"] = result.get("subject", "")
             line_out["body"] = result.get("email_body", "")
             line_out["news based summary"] = result.get("news_based_summary", "")

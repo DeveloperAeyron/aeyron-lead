@@ -22,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from email_batch import load_rows_from_csv, load_rows_from_xlsx, process_batch, rows_to_csv_bytes
 from email_generation import EmailGenerationInput, generate_email_draft
+from prompt import get_default_prompt_sections, get_prompt_sections, save_prompts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -530,6 +531,45 @@ print(json.dumps(result))
     except Exception as e:
         LOG.exception("Enrich failed for %s", url)
         return {"emails": [], "socials": {}, "error": str(e), "pages_checked": []}
+
+
+# ── Prompt Management ──────────────────────────────────────────────────
+
+class PromptUpdateRequest(BaseModel):
+    product_portfolio: Optional[str] = None
+    non_negotiable_rules: Optional[str] = None
+    tone_anchor: Optional[str] = None
+
+
+@app.get("/api/prompts")
+async def get_prompts():
+    """Return current prompt sections and defaults for the UI editor."""
+    return {
+        "current": get_prompt_sections(),
+        "defaults": get_default_prompt_sections(),
+    }
+
+
+@app.put("/api/prompts")
+async def update_prompts(req: PromptUpdateRequest):
+    """Update one or more prompt sections. Only provided fields are changed."""
+    current = get_prompt_sections()
+    if req.product_portfolio is not None:
+        current["product_portfolio"] = req.product_portfolio.strip()
+    if req.non_negotiable_rules is not None:
+        current["non_negotiable_rules"] = req.non_negotiable_rules.strip()
+    if req.tone_anchor is not None:
+        current["tone_anchor"] = req.tone_anchor.strip()
+    save_prompts(current)
+    return {"status": "saved", "current": current}
+
+
+@app.post("/api/prompts/reset")
+async def reset_prompts():
+    """Reset all prompt sections back to the hardcoded defaults."""
+    defaults = get_default_prompt_sections()
+    save_prompts(defaults)
+    return {"status": "reset", "current": defaults}
 
 
 @app.get("/api/health")
