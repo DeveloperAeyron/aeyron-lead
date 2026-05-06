@@ -482,8 +482,14 @@ async def generate_email_batch_async(
             "job_id": job_id,
             "status": "queued",
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": "",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "filename": file.filename or "",
             "error": "",
+            "phase": "queued",
+            "total_rows": 0,
+            "completed_rows": 0,
+            "current_company": "",
         }
 
     research_on = (do_research or "").strip().lower() in ("1", "true", "yes", "on")
@@ -510,6 +516,9 @@ async def generate_email_batch_async(
         try:
             with _batch_jobs_lock:
                 _batch_jobs[job_id]["status"] = "running"
+                _batch_jobs[job_id]["phase"] = "loading_sheet"
+                _batch_jobs[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
+                _batch_jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
             def load_sheet() -> list[dict[str, Any]]:
                 if fname.endswith(".csv"):
@@ -517,8 +526,35 @@ async def generate_email_batch_async(
                 return load_rows_from_xlsx(raw)
 
             rows = load_sheet()
-            out_rows, fieldnames = process_batch(rows, base, max_rows=cap, sleep_ms=gap, concurrency=conc)
+            with _batch_jobs_lock:
+                _batch_jobs[job_id]["phase"] = "running"
+                _batch_jobs[job_id]["total_rows"] = min(max(1, cap), len(rows))
+                _batch_jobs[job_id]["completed_rows"] = 0
+                _batch_jobs[job_id]["current_company"] = ""
+                _batch_jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            def on_progress(completed: int, total: int, company: str) -> None:
+                with _batch_jobs_lock:
+                    job = _batch_jobs.get(job_id)
+                    if not job:
+                        return
+                    job["completed_rows"] = int(completed)
+                    job["total_rows"] = int(total)
+                    job["current_company"] = (company or "")[:220]
+                    job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            out_rows, fieldnames = process_batch(
+                rows,
+                base,
+                max_rows=cap,
+                sleep_ms=gap,
+                concurrency=conc,
+                on_progress=on_progress,
+            )
             csv_bytes = rows_to_csv_bytes(out_rows, fieldnames)
+            with _batch_jobs_lock:
+                _batch_jobs[job_id]["phase"] = "writing_csv"
+                _batch_jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
             out_path.write_bytes(csv_bytes)
             meta_path.write_text(
                 json.dumps(
@@ -538,11 +574,16 @@ async def generate_email_batch_async(
 
             with _batch_jobs_lock:
                 _batch_jobs[job_id]["status"] = "complete"
+                _batch_jobs[job_id]["phase"] = "complete"
+                _batch_jobs[job_id]["completed_rows"] = len(out_rows)
+                _batch_jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
         except Exception as exc:
             LOG.exception("Async batch job failed: %s", job_id)
             with _batch_jobs_lock:
                 _batch_jobs[job_id]["status"] = "failed"
+                _batch_jobs[job_id]["phase"] = "failed"
                 _batch_jobs[job_id]["error"] = str(exc)
+                _batch_jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     asyncio.create_task(asyncio.to_thread(_run_job))
     return {"job_id": job_id, "status": "queued"}

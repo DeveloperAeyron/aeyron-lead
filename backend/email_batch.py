@@ -6,7 +6,7 @@ import io
 import threading
 import time
 from io import BytesIO
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openpyxl import load_workbook
@@ -153,6 +153,7 @@ def process_batch(
     max_rows: int = 50,
     sleep_ms: int = 0,
     concurrency: int = 1,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """
     For each row: company research (cached per company), personalised email, news summary.
@@ -162,6 +163,7 @@ def process_batch(
         raise ValueError("No data rows in spreadsheet.")
 
     capped = rows[: max(1, max_rows)]
+    total = len(capped)
     research_cache: dict[str, list[dict[str, str]]] = {}
     research_locks: dict[str, threading.Lock] = {}
     research_locks_guard = threading.Lock()
@@ -253,6 +255,12 @@ def process_batch(
         for i, raw in enumerate(capped):
             _, line_out = _process_one(i, raw)
             outputs.append(line_out)
+            if on_progress is not None:
+                company = _pick_field(raw, _COMPANY_KEYS) or ""
+                try:
+                    on_progress(i + 1, total, company)
+                except Exception:
+                    pass
             if sleep_ms > 0 and i + 1 < len(capped):
                 time.sleep(sleep_ms / 1000.0)
         return outputs, fieldnames
@@ -267,9 +275,17 @@ def process_batch(
                 # Rate-limit submission to avoid spiky upstream requests.
                 time.sleep(sleep_ms / 1000.0)
 
+        completed = 0
         for fut in as_completed(futs):
             i, line_out = fut.result()
             ordered[i] = line_out
+            completed += 1
+            if on_progress is not None:
+                company = _pick_field(capped[i], _COMPANY_KEYS) or ""
+                try:
+                    on_progress(completed, total, company)
+                except Exception:
+                    pass
 
     outputs = [r for r in ordered if r is not None]
 

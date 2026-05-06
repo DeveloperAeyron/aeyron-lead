@@ -50,6 +50,10 @@ export default function OutreachPage() {
   const [batchFile, setBatchFile] = useState<File | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchStatus, setBatchStatus] = useState<string>("");
+  const [batchCompleted, setBatchCompleted] = useState<number>(0);
+  const [batchTotal, setBatchTotal] = useState<number>(0);
+  const [batchCompany, setBatchCompany] = useState<string>("");
   const [batchMaxRows, setBatchMaxRows] = useState(40);
   const [batchSkipResearch, setBatchSkipResearch] = useState(false);
   const [batchConcurrency, setBatchConcurrency] = useState(4);
@@ -182,6 +186,10 @@ export default function OutreachPage() {
   const handleBatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBatchError(null);
+    setBatchStatus("");
+    setBatchCompleted(0);
+    setBatchTotal(0);
+    setBatchCompany("");
     if (!batchFile) {
       setBatchError("Choose a CSV or Excel file (.csv, .xlsx).");
       return;
@@ -210,7 +218,19 @@ export default function OutreachPage() {
           await new Promise((r) => setTimeout(r, 1500));
           const statusRes = await fetch(api.generateEmailBatchAsyncJobUrl(jobId), withApiHeaders());
           if (!statusRes.ok) throw new Error(await detailFromResponse(statusRes));
-          const job = (await statusRes.json()) as { status?: string; error?: string; download_url?: string };
+          const job = (await statusRes.json()) as {
+            status?: string;
+            phase?: string;
+            error?: string;
+            download_url?: string;
+            completed_rows?: number;
+            total_rows?: number;
+            current_company?: string;
+          };
+          setBatchStatus(job.phase || job.status || "");
+          setBatchCompleted(typeof job.completed_rows === "number" ? job.completed_rows : 0);
+          setBatchTotal(typeof job.total_rows === "number" ? job.total_rows : 0);
+          setBatchCompany((job.current_company || "").trim());
           if (job.status === "failed") throw new Error(job.error || "Batch job failed.");
           if (job.status === "complete" && job.download_url) return job.download_url;
         }
@@ -338,6 +358,35 @@ export default function OutreachPage() {
 
         {batchError && (
           <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">{batchError}</div>
+        )}
+
+        {batchLoading && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-secondary)]">
+              <span className="font-medium">
+                {batchTotal > 0 ? `${Math.min(batchCompleted, batchTotal)} / ${batchTotal} processed` : "Preparing…"}
+              </span>
+              <span className="font-mono">
+                {(batchStatus || "running").toLowerCase()}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-black/20 border border-[var(--border-subtle)] overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-teal-500 to-cyan-500 transition-all"
+                style={{
+                  width:
+                    batchTotal > 0
+                      ? `${Math.max(2, Math.min(100, Math.round((batchCompleted / batchTotal) * 100)))}%`
+                      : "8%",
+                }}
+              />
+            </div>
+            {batchCompany ? (
+              <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                Current: <span className="text-[var(--text-primary)]">{batchCompany}</span>
+              </div>
+            ) : null}
+          </div>
         )}
 
         <button
