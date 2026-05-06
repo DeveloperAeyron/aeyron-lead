@@ -129,6 +129,34 @@ Best regards,
 """.strip()
 
 
+_DEFAULT_SYSTEM_PROMPT_TEMPLATE = f"""You are a senior B2B cold email copywriter for Aeyron — a software
+development agency that builds AI automation, document intelligence, custom web and mobile
+applications, workflow automation, dashboards, cloud infrastructure, IoT, and computer vision
+systems for teams that need practical modernisation.
+
+Your only job is to turn a prospect's role, company, industry, and any available context into
+one short, credible, low-pressure email package that could earn a reply. You also produce
+controlled variations for testing.
+
+Write in British English (UK spelling and phrasing).
+
+{_DEFAULT_PRODUCT_PORTFOLIO}
+
+RULES (non-negotiable)
+{_DEFAULT_NON_NEGOTIABLE_RULES}
+
+TONE ANCHOR (structure only)
+{_DEFAULT_TONE_ANCHOR}
+
+OUTPUT FORMAT
+
+Return strict JSON only (no markdown fences). Match this shape — keys and nesting must match:
+{{OUTPUT_CONTRACT_JSON}}
+
+The email bodies inside primary_email and the two variations must each obey all rules above.
+subject_lines must contain exactly five strings."""
+
+
 def get_prompt_sections() -> dict[str, str]:
     """Return the active prompt sections (overrides take precedence over defaults)."""
     overrides = _load_overrides()
@@ -146,6 +174,24 @@ def get_default_prompt_sections() -> dict[str, str]:
         "non_negotiable_rules": _DEFAULT_NON_NEGOTIABLE_RULES,
         "tone_anchor": _DEFAULT_TONE_ANCHOR,
     }
+
+
+def get_system_prompt_template() -> str:
+    """Return the active system prompt template (editable as one block).
+
+    The template must contain the token ``{OUTPUT_CONTRACT_JSON}``, which will be
+    replaced at runtime with the current JSON contract.
+    """
+    overrides = _load_overrides()
+    text = str(overrides.get("system_prompt_template") or "").strip()
+    if text:
+        return text
+    return _DEFAULT_SYSTEM_PROMPT_TEMPLATE
+
+
+def get_default_system_prompt_template() -> str:
+    """Return the hardcoded default system prompt template (ignoring overrides)."""
+    return _DEFAULT_SYSTEM_PROMPT_TEMPLATE
 
 
 # Keep module-level aliases for any legacy imports
@@ -267,34 +313,9 @@ def build_email_generation_prompt(
     email = _row_value(row, "Email", "email_address")
     industry = _row_value(row, "Industry", "industry", "sector", "vertical")
 
-    sections = get_prompt_sections()
-
-    system_prompt = f"""You are a senior B2B cold email copywriter for Aeyron — a software
-development agency that builds AI automation, document intelligence, custom web and mobile
-applications, workflow automation, dashboards, cloud infrastructure, IoT, and computer vision
-systems for teams that need practical modernisation.
-
-Your only job is to turn a prospect's role, company, industry, and any available context into
-one short, credible, low-pressure email package that could earn a reply. You also produce
-controlled variations for testing.
-
-Write in British English (UK spelling and phrasing).
-
-{sections["product_portfolio"]}
-
-RULES (non-negotiable)
-{sections["non_negotiable_rules"]}
-
-TONE ANCHOR (structure only)
-{sections["tone_anchor"]}
-
-OUTPUT FORMAT
-
-Return strict JSON only (no markdown fences). Match this shape — keys and nesting must match:
-{json.dumps(OUTPUT_CONTRACT, ensure_ascii=False, indent=2)}
-
-The email bodies inside primary_email and the two variations must each obey all rules above.
-subject_lines must contain exactly five strings."""
+    template = get_system_prompt_template()
+    contract_json = json.dumps(OUTPUT_CONTRACT, ensure_ascii=False, indent=2)
+    system_prompt = template.replace("{OUTPUT_CONTRACT_JSON}", contract_json)
 
     # Build the prospect details block
     prospect_lines = [

@@ -22,7 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from email_batch import load_rows_from_csv, load_rows_from_xlsx, process_batch, rows_to_csv_bytes
 from email_generation import EmailGenerationInput, generate_email_draft
-from prompt import get_default_prompt_sections, get_prompt_sections, save_prompts
+from prompt import get_default_system_prompt_template, get_system_prompt_template, save_prompts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -536,40 +536,37 @@ print(json.dumps(result))
 # ── Prompt Management ──────────────────────────────────────────────────
 
 class PromptUpdateRequest(BaseModel):
-    product_portfolio: Optional[str] = None
-    non_negotiable_rules: Optional[str] = None
-    tone_anchor: Optional[str] = None
+    system_prompt_template: Optional[str] = None
 
 
 @app.get("/api/prompts")
 async def get_prompts():
-    """Return current prompt sections and defaults for the UI editor."""
+    """Return current system prompt template and default for the UI editor."""
     return {
-        "current": get_prompt_sections(),
-        "defaults": get_default_prompt_sections(),
+        "current": {"system_prompt_template": get_system_prompt_template()},
+        "defaults": {"system_prompt_template": get_default_system_prompt_template()},
     }
 
 
 @app.put("/api/prompts")
 async def update_prompts(req: PromptUpdateRequest):
-    """Update one or more prompt sections. Only provided fields are changed."""
-    current = get_prompt_sections()
-    if req.product_portfolio is not None:
-        current["product_portfolio"] = req.product_portfolio.strip()
-    if req.non_negotiable_rules is not None:
-        current["non_negotiable_rules"] = req.non_negotiable_rules.strip()
-    if req.tone_anchor is not None:
-        current["tone_anchor"] = req.tone_anchor.strip()
-    save_prompts(current)
-    return {"status": "saved", "current": current}
+    """Update the system prompt template."""
+    text = (req.system_prompt_template or "").strip()
+    if "{OUTPUT_CONTRACT_JSON}" not in text:
+        raise HTTPException(
+            status_code=422,
+            detail="system_prompt_template must include the token {OUTPUT_CONTRACT_JSON}.",
+        )
+    save_prompts({"system_prompt_template": text})
+    return {"status": "saved", "current": {"system_prompt_template": text}}
 
 
 @app.post("/api/prompts/reset")
 async def reset_prompts():
-    """Reset all prompt sections back to the hardcoded defaults."""
-    defaults = get_default_prompt_sections()
-    save_prompts(defaults)
-    return {"status": "reset", "current": defaults}
+    """Reset the system prompt template back to the hardcoded default."""
+    default_template = get_default_system_prompt_template()
+    save_prompts({"system_prompt_template": default_template})
+    return {"status": "reset", "current": {"system_prompt_template": default_template}}
 
 
 @app.get("/api/health")

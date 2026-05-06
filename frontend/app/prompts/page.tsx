@@ -3,42 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, withApiHeaders } from "@/lib/api";
 
-interface PromptSections {
-  product_portfolio: string;
-  non_negotiable_rules: string;
-  tone_anchor: string;
+interface PromptPayload {
+  system_prompt_template: string;
 }
 
-const SECTION_META: { key: keyof PromptSections; label: string; description: string }[] = [
-  {
-    key: "product_portfolio",
-    label: "Product Portfolio",
-    description:
-      "The product catalogue injected into the system prompt. The model picks at most one product per email.",
-  },
-  {
-    key: "non_negotiable_rules",
-    label: "Non-Negotiable Rules",
-    description:
-      "Hard constraints the model must follow: subject line style, word limits, forbidden words, CTA shape, etc.",
-  },
-  {
-    key: "tone_anchor",
-    label: "Tone Anchor (Example)",
-    description:
-      "A fictional example email that anchors the model's style. It imitates structure, not wording.",
-  },
-];
-
 export default function PromptsPage() {
-  const [current, setCurrent] = useState<PromptSections | null>(null);
-  const [defaults, setDefaults] = useState<PromptSections | null>(null);
-  const [editing, setEditing] = useState<PromptSections | null>(null);
+  const [current, setCurrent] = useState<PromptPayload | null>(null);
+  const [defaults, setDefaults] = useState<PromptPayload | null>(null);
+  const [editing, setEditing] = useState<PromptPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [expandedSection, setExpandedSection] = useState<keyof PromptSections | null>(null);
 
   const fetchPrompts = useCallback(async () => {
     setError(null);
@@ -113,9 +89,6 @@ export default function PromptsPage() {
   const hasChanges =
     editing && current && JSON.stringify(editing) !== JSON.stringify(current);
 
-  const isModifiedFromDefault = (key: keyof PromptSections) =>
-    defaults && current && current[key] !== defaults[key];
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -151,91 +124,50 @@ export default function PromptsPage() {
         </div>
       )}
 
-      <div className="space-y-6">
-        {SECTION_META.map(({ key, label, description }) => {
-          const isExpanded = expandedSection === key;
-          const modified = isModifiedFromDefault(key);
+      <div className="glass-card rounded-2xl border border-[var(--border-subtle)] p-6 md:p-8 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+              System prompt (single block)
+            </h2>
+            <p className="text-xs text-[var(--text-secondary)] mt-1">
+              This is the exact system prompt template sent to the model. Keep the token{" "}
+              <span className="font-mono text-[var(--text-primary)]">{`{OUTPUT_CONTRACT_JSON}`}</span>{" "}
+              somewhere in the text — it will be replaced at runtime with the required JSON output schema.
+            </p>
+          </div>
+          {defaults && current && current.system_prompt_template !== defaults.system_prompt_template ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">
+              Modified
+            </span>
+          ) : null}
+        </div>
 
-          return (
-            <div
-              key={key}
-              className="glass-card rounded-2xl border border-[var(--border-subtle)] overflow-hidden"
-            >
-              <button
-                type="button"
-                onClick={() => setExpandedSection(isExpanded ? null : key)}
-                className="w-full flex items-center justify-between p-5 md:p-6 text-left hover:bg-white/[0.02] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/15 text-purple-400">
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
-                      />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-[var(--text-primary)]">{label}</span>
-                      {modified && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">
-                          Modified
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] mt-0.5">{description}</p>
-                  </div>
-                </div>
-                <svg
-                  className={`w-5 h-5 text-[var(--text-secondary)] transition-transform ${
-                    isExpanded ? "rotate-180" : ""
-                  }`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </button>
+        {editing ? (
+          <textarea
+            value={editing.system_prompt_template}
+            onChange={(e) =>
+              setEditing((prev) => (prev ? { ...prev, system_prompt_template: e.target.value } : prev))
+            }
+            rows={22}
+            className="w-full rounded-xl bg-black/30 border border-[var(--border-subtle)] p-4 text-sm text-[var(--text-primary)] font-mono resize-y focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/40 scrollbar-thin placeholder:text-[var(--text-secondary)]/40"
+            spellCheck={false}
+          />
+        ) : null}
 
-              {isExpanded && editing && (
-                <div className="px-5 md:px-6 pb-5 md:pb-6 space-y-3">
-                  <textarea
-                    value={editing[key]}
-                    onChange={(e) =>
-                      setEditing((prev) => (prev ? { ...prev, [key]: e.target.value } : prev))
-                    }
-                    rows={16}
-                    className="w-full rounded-xl bg-black/30 border border-[var(--border-subtle)] p-4 text-sm text-[var(--text-primary)] font-mono resize-y focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/40 scrollbar-thin placeholder:text-[var(--text-secondary)]/40"
-                    spellCheck={false}
-                  />
-                  {modified && defaults && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEditing((prev) =>
-                          prev ? { ...prev, [key]: defaults[key] } : prev,
-                        )
-                      }
-                      className="text-xs text-amber-400 hover:text-amber-300 font-medium"
-                    >
-                      Revert this section to default
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {defaults && (
+          <button
+            type="button"
+            onClick={() =>
+              setEditing((prev) =>
+                prev ? { ...prev, system_prompt_template: defaults.system_prompt_template } : prev,
+              )
+            }
+            className="text-xs text-amber-400 hover:text-amber-300 font-medium"
+          >
+            Revert to default
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3 pt-2">
