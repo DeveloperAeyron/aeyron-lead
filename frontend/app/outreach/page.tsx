@@ -197,10 +197,31 @@ export default function OutreachPage() {
       fd.append("ollama_url", ollamaUrl.trim() || "http://localhost:11434");
       fd.append("temperature", String(temperature));
       fd.append("timeout_s", String(timeoutS));
-      const res = await fetch(api.generateEmailBatchUrl, withApiHeaders({ method: "POST", body: fd }));
-      if (!res.ok) {
-        throw new Error(await detailFromResponse(res));
-      }
+      // Use async job flow to avoid proxy timeouts (ngrok, etc.)
+      const startRes = await fetch(api.generateEmailBatchAsyncUrl, withApiHeaders({ method: "POST", body: fd }));
+      if (!startRes.ok) throw new Error(await detailFromResponse(startRes));
+      const start = (await startRes.json()) as { job_id?: string };
+      const jobId = (start.job_id || "").trim();
+      if (!jobId) throw new Error("Batch job did not return a job_id.");
+
+      const pollUntilDone = async (): Promise<string> => {
+        const deadline = Date.now() + 60 * 60 * 1000; // 60 minutes
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const statusRes = await fetch(api.generateEmailBatchAsyncJobUrl(jobId), withApiHeaders());
+          if (!statusRes.ok) throw new Error(await detailFromResponse(statusRes));
+          const job = (await statusRes.json()) as { status?: string; error?: string; download_url?: string };
+          if (job.status === "failed") throw new Error(job.error || "Batch job failed.");
+          if (job.status === "complete" && job.download_url) return job.download_url;
+        }
+        throw new Error("Batch job timed out (60 minutes).");
+      };
+
+      const downloadPath = await pollUntilDone();
+      const downloadUrl = downloadPath.startsWith("http") ? downloadPath : `${api.generateEmailBatchAsyncUrl}/${jobId}/download`;
+      const res = await fetch(downloadUrl, withApiHeaders());
+      if (!res.ok) throw new Error(await detailFromResponse(res));
+
       const blob = await res.blob();
       const href = URL.createObjectURL(blob);
       const a = document.createElement("a");

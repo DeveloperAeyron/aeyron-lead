@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from threading import Lock
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +37,13 @@ BACKEND_ROOT = Path(__file__).resolve().parent
 SCRAPER_PATH = BACKEND_ROOT / "spawn-radius-scraper-v2.py"
 SESSIONS_DIR = BACKEND_ROOT / "sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Batch job storage (avoids proxy timeouts for long runs)
+BATCH_JOBS_DIR = BACKEND_ROOT / "batch-jobs"
+BATCH_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+_batch_jobs: dict[str, dict[str, Any]] = {}
+_batch_jobs_lock = Lock()
 
 # ── App ────────────────────────────────────────────────────────────────
 app = FastAPI(title="Lead Radar API", version="1.0.0")
@@ -438,6 +446,131 @@ async def generate_email_batch(
         content=csv_bytes,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="email-campaigns.csv"'},
+    )
+
+
+@app.post("/api/generate-email/batch-async")
+async def generate_email_batch_async(
+    file: UploadFile = File(...),
+    model: str = Form("qwen2.5:3b"),
+    ollama_url: str = Form("http://localhost:11434"),
+    temperature: float = Form(0.22),
+    timeout_s: int = Form(420),
+    do_research: str = Form("true"),
+    max_rows: int = Form(40),
+    sleep_ms: int = Form(250),
+    concurrency: int = Form(4),
+    context_items: int = Form(12),
+    context_snippet_chars: int = Form(5200),
+):
+    """Start a batch job and return a job id immediately (recommended behind ngrok/proxies)."""
+    fname = (file.filename or "").lower()
+    if not fname.endswith((".xlsx", ".xlsm", ".csv")):
+        raise HTTPException(status_code=400, detail="Upload a CSV or Excel file (.csv, .xlsx, or .xlsm).")
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 25 MB).")
+
+    job_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    job_dir = BATCH_JOBS_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    out_path = job_dir / "email-campaigns.csv"
+    meta_path = job_dir / "meta.json"
+
+    with _batch_jobs_lock:
+        _batch_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "filename": file.filename or "",
+            "error": "",
+        }
+
+    research_on = (do_research or "").strip().lower() in ("1", "true", "yes", "on")
+    cap = max(1, min(int(max_rows), 200))
+    gap = max(0, int(sleep_ms))
+    conc = max(1, min(int(concurrency), 32))
+
+    base = EmailGenerationInput(
+        company_name="batch",
+        email="",
+        do_research=research_on,
+        ollama_url=(ollama_url or "").strip() or "http://localhost:11434",
+        model=(model or "").strip() or "qwen2.5:3b",
+        temperature=float(temperature),
+        timeout_s=int(timeout_s),
+        context_items=max(3, int(context_items)),
+        context_snippet_chars=max(600, int(context_snippet_chars)),
+        research_limit=14,
+        per_source_limit=10,
+        fetch_page_limit=10,
+    )
+
+    def _run_job() -> None:
+        try:
+            with _batch_jobs_lock:
+                _batch_jobs[job_id]["status"] = "running"
+
+            def load_sheet() -> list[dict[str, Any]]:
+                if fname.endswith(".csv"):
+                    return load_rows_from_csv(raw)
+                return load_rows_from_xlsx(raw)
+
+            rows = load_sheet()
+            out_rows, fieldnames = process_batch(rows, base, max_rows=cap, sleep_ms=gap, concurrency=conc)
+            csv_bytes = rows_to_csv_bytes(out_rows, fieldnames)
+            out_path.write_bytes(csv_bytes)
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "job_id": job_id,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "row_count": len(out_rows),
+                        "max_rows": cap,
+                        "concurrency": conc,
+                        "do_research": research_on,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            with _batch_jobs_lock:
+                _batch_jobs[job_id]["status"] = "complete"
+        except Exception as exc:
+            LOG.exception("Async batch job failed: %s", job_id)
+            with _batch_jobs_lock:
+                _batch_jobs[job_id]["status"] = "failed"
+                _batch_jobs[job_id]["error"] = str(exc)
+
+    asyncio.create_task(asyncio.to_thread(_run_job))
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/generate-email/batch-async/{job_id}")
+async def get_generate_email_batch_job(job_id: str):
+    """Return job status, and download URL when complete."""
+    with _batch_jobs_lock:
+        job = _batch_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    payload = dict(job)
+    if payload.get("status") == "complete":
+        payload["download_url"] = f"/api/generate-email/batch-async/{job_id}/download"
+    return payload
+
+
+@app.get("/api/generate-email/batch-async/{job_id}/download")
+async def download_generate_email_batch_job(job_id: str):
+    """Download finished CSV for a batch job."""
+    path = BATCH_JOBS_DIR / job_id / "email-campaigns.csv"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="CSV not ready for this job.")
+    return FileResponse(
+        path=str(path),
+        media_type="text/csv; charset=utf-8",
+        filename="email-campaigns.csv",
     )
 
 

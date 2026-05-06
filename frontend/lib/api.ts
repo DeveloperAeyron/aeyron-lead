@@ -31,6 +31,8 @@ export const api = {
   enrichUrl: `${API_BASE}/api/enrich-website`,
   generateEmailUrl: `${API_BASE}/api/generate-email`,
   generateEmailBatchUrl: `${API_BASE}/api/generate-email/batch`,
+  generateEmailBatchAsyncUrl: `${API_BASE}/api/generate-email/batch-async`,
+  generateEmailBatchAsyncJobUrl: (jobId: string) => `${API_BASE}/api/generate-email/batch-async/${jobId}`,
   promptsUrl: `${API_BASE}/api/prompts`,
   promptsResetUrl: `${API_BASE}/api/prompts/reset`,
   healthUrl: `${API_BASE}/api/health`,
