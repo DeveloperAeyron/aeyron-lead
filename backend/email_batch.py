@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import csv
 import io
+import threading
 import time
 from io import BytesIO
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openpyxl import load_workbook
 
 from email_generation import (
@@ -150,6 +152,8 @@ def process_batch(
     *,
     max_rows: int = 50,
     sleep_ms: int = 0,
+    concurrency: int = 1,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """
     For each row: company research (cached per company), personalised email, news summary.
@@ -159,7 +163,10 @@ def process_batch(
         raise ValueError("No data rows in spreadsheet.")
 
     capped = rows[: max(1, max_rows)]
+    total = len(capped)
     research_cache: dict[str, list[dict[str, str]]] = {}
+    research_locks: dict[str, threading.Lock] = {}
+    research_locks_guard = threading.Lock()
     outputs: list[dict[str, Any]] = []
 
     # Stable column order: original keys from first row, then new columns
@@ -167,7 +174,16 @@ def process_batch(
     extra_cols = ["subject", "body", "news based summary", "generation_error"]
     fieldnames = base_keys + [c for c in extra_cols if c not in base_keys]
 
-    for i, raw in enumerate(capped):
+    def _company_lock(cache_key: str) -> threading.Lock:
+        # Lazily create a per-company lock, guarded by a global lock.
+        with research_locks_guard:
+            lk = research_locks.get(cache_key)
+            if lk is None:
+                lk = threading.Lock()
+                research_locks[cache_key] = lk
+            return lk
+
+    def _process_one(i: int, raw: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         line_out = {k: raw.get(k, "") for k in base_keys}
         for c in extra_cols:
             line_out.setdefault(c, "")
@@ -176,8 +192,7 @@ def process_batch(
 
         if not company:
             line_out["generation_error"] = "Missing company name (use a column named e.g. company name or company)."
-            outputs.append(line_out)
-            continue
+            return i, line_out
 
         row_dict = make_prompt_row(
             email=email,
@@ -192,26 +207,40 @@ def process_batch(
         research_used = False
         try:
             ck = company_cache_key(company)
-            if ck and ck in research_cache:
-                raw_news = list(research_cache[ck])
+            if ck:
+                # Ensure only one thread performs research per company per run.
+                with _company_lock(ck):
+                    if ck in research_cache:
+                        raw_news = list(research_cache[ck])
+                    else:
+                        if base.do_research:
+                            report = _research_company(company, _research_namespace(base))
+                            raw_news = list(_company_report_context(report))
+                            research_cache[ck] = list(raw_news)
+                            research_used = True
+                        else:
+                            raw_news = []
             else:
                 if base.do_research:
                     report = _research_company(company, _research_namespace(base))
                     raw_news = list(_company_report_context(report))
-                    if ck:
-                        research_cache[ck] = list(raw_news)
                     research_used = True
                 else:
                     raw_news = []
 
-            prepend_prospect_website_block(raw_news, _pick_field(raw, _WEBSITE_KEYS))
+            row_website = _pick_field(raw, _WEBSITE_KEYS)
+            prepend_prospect_website_block(raw_news, row_website)
 
             trimmed = _trim_news_context(
                 raw_news,
                 max_items=max(1, base.context_items),
                 snippet_chars=base.context_snippet_chars,
             )
-            result = generate_with_trimmed_context(row_dict, trimmed, base, research_used=research_used)
+            result = generate_with_trimmed_context(
+                row_dict, trimmed, base,
+                research_used=research_used,
+                website_url_override=row_website,
+            )
             line_out["subject"] = result.get("subject", "")
             line_out["body"] = result.get("email_body", "")
             line_out["news based summary"] = result.get("news_based_summary", "")
@@ -219,10 +248,46 @@ def process_batch(
         except Exception as exc:
             line_out["generation_error"] = str(exc)
 
-        outputs.append(line_out)
+        return i, line_out
 
-        if sleep_ms > 0 and i + 1 < len(capped):
-            time.sleep(sleep_ms / 1000.0)
+    conc = max(1, int(concurrency))
+    if conc == 1:
+        for i, raw in enumerate(capped):
+            _, line_out = _process_one(i, raw)
+            outputs.append(line_out)
+            if on_progress is not None:
+                company = _pick_field(raw, _COMPANY_KEYS) or ""
+                try:
+                    on_progress(i + 1, total, company)
+                except Exception:
+                    pass
+            if sleep_ms > 0 and i + 1 < len(capped):
+                time.sleep(sleep_ms / 1000.0)
+        return outputs, fieldnames
+
+    # Parallel execution (bounded by conc). We preserve output row order.
+    ordered: list[dict[str, Any] | None] = [None] * len(capped)
+    with ThreadPoolExecutor(max_workers=conc) as ex:
+        futs = []
+        for i, raw in enumerate(capped):
+            futs.append(ex.submit(_process_one, i, raw))
+            if sleep_ms > 0 and i + 1 < len(capped):
+                # Rate-limit submission to avoid spiky upstream requests.
+                time.sleep(sleep_ms / 1000.0)
+
+        completed = 0
+        for fut in as_completed(futs):
+            i, line_out = fut.result()
+            ordered[i] = line_out
+            completed += 1
+            if on_progress is not None:
+                company = _pick_field(capped[i], _COMPANY_KEYS) or ""
+                try:
+                    on_progress(completed, total, company)
+                except Exception:
+                    pass
+
+    outputs = [r for r in ordered if r is not None]
 
     return outputs, fieldnames
 

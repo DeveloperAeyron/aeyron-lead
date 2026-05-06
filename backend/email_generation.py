@@ -64,8 +64,8 @@ class EmailGenerationInput:
     model: str = "qwen2.5:3b"
     temperature: float = 0.25
     timeout_s: int = 300
-    context_items: int = 5
-    context_snippet_chars: int = 2800
+    context_items: int = 8
+    context_snippet_chars: int = 3800
     research_limit: int = 12
     per_source_limit: int = 8
     fetch_page_limit: int = 5
@@ -152,9 +152,16 @@ def generate_with_trimmed_context(
     inp: EmailGenerationInput,
     *,
     research_used: bool,
+    website_url_override: str = "",
+    additional_context_override: str = "",
 ) -> dict[str, Any]:
     """Run Ollama after news context is finalised (trimmed). Shared by single and batch flows."""
-    messages = build_email_generation_prompt(row, trimmed_news_context)
+    messages = build_email_generation_prompt(
+        row,
+        trimmed_news_context,
+        website_url=website_url_override or inp.website_url,
+        additional_context=additional_context_override or inp.additional_context,
+    )
     generation = _ollama_chat(
         url=_normalise_ollama_chat_url(inp.ollama_url),
         model=inp.model,
@@ -207,17 +214,6 @@ def generate_email_draft(inp: EmailGenerationInput) -> dict[str, Any]:
         research_used = True
     else:
         news_context = list(_row_news_context(row))
-
-    extra = (inp.additional_context or "").strip()
-    if extra:
-        news_context.insert(
-            0,
-            {
-                "title": "Additional context",
-                "snippet": extra[:12_000],
-                "url": "",
-            },
-        )
 
     prepend_prospect_website_block(news_context, inp.website_url)
 

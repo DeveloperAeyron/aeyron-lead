@@ -50,8 +50,13 @@ export default function OutreachPage() {
   const [batchFile, setBatchFile] = useState<File | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchStatus, setBatchStatus] = useState<string>("");
+  const [batchCompleted, setBatchCompleted] = useState<number>(0);
+  const [batchTotal, setBatchTotal] = useState<number>(0);
+  const [batchCompany, setBatchCompany] = useState<string>("");
   const [batchMaxRows, setBatchMaxRows] = useState(40);
   const [batchSkipResearch, setBatchSkipResearch] = useState(false);
+  const [batchConcurrency, setBatchConcurrency] = useState(4);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +186,10 @@ export default function OutreachPage() {
   const handleBatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBatchError(null);
+    setBatchStatus("");
+    setBatchCompleted(0);
+    setBatchTotal(0);
+    setBatchCompany("");
     if (!batchFile) {
       setBatchError("Choose a CSV or Excel file (.csv, .xlsx).");
       return;
@@ -190,15 +199,49 @@ export default function OutreachPage() {
       const fd = new FormData();
       fd.append("file", batchFile);
       fd.append("max_rows", String(batchMaxRows));
+      fd.append("concurrency", String(batchConcurrency));
       fd.append("do_research", batchSkipResearch ? "false" : "true");
       fd.append("model", model.trim() || "qwen2.5:3b");
       fd.append("ollama_url", ollamaUrl.trim() || "http://localhost:11434");
       fd.append("temperature", String(temperature));
       fd.append("timeout_s", String(timeoutS));
-      const res = await fetch(api.generateEmailBatchUrl, withApiHeaders({ method: "POST", body: fd }));
-      if (!res.ok) {
-        throw new Error(await detailFromResponse(res));
-      }
+      // Use async job flow to avoid proxy timeouts (ngrok, etc.)
+      const startRes = await fetch(api.generateEmailBatchAsyncUrl, withApiHeaders({ method: "POST", body: fd }));
+      if (!startRes.ok) throw new Error(await detailFromResponse(startRes));
+      const start = (await startRes.json()) as { job_id?: string };
+      const jobId = (start.job_id || "").trim();
+      if (!jobId) throw new Error("Batch job did not return a job_id.");
+
+      const pollUntilDone = async (): Promise<string> => {
+        const deadline = Date.now() + 60 * 60 * 1000; // 60 minutes
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const statusRes = await fetch(api.generateEmailBatchAsyncJobUrl(jobId), withApiHeaders());
+          if (!statusRes.ok) throw new Error(await detailFromResponse(statusRes));
+          const job = (await statusRes.json()) as {
+            status?: string;
+            phase?: string;
+            error?: string;
+            download_url?: string;
+            completed_rows?: number;
+            total_rows?: number;
+            current_company?: string;
+          };
+          setBatchStatus(job.phase || job.status || "");
+          setBatchCompleted(typeof job.completed_rows === "number" ? job.completed_rows : 0);
+          setBatchTotal(typeof job.total_rows === "number" ? job.total_rows : 0);
+          setBatchCompany((job.current_company || "").trim());
+          if (job.status === "failed") throw new Error(job.error || "Batch job failed.");
+          if (job.status === "complete" && job.download_url) return job.download_url;
+        }
+        throw new Error("Batch job timed out (60 minutes).");
+      };
+
+      const downloadPath = await pollUntilDone();
+      const downloadUrl = downloadPath.startsWith("http") ? downloadPath : `${api.generateEmailBatchAsyncUrl}/${jobId}/download`;
+      const res = await fetch(downloadUrl, withApiHeaders());
+      if (!res.ok) throw new Error(await detailFromResponse(res));
+
       const blob = await res.blob();
       const href = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -282,6 +325,19 @@ export default function OutreachPage() {
               className="input-field"
             />
           </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
+              Concurrency
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={32}
+              value={batchConcurrency}
+              onChange={(e) => setBatchConcurrency(parseInt(e.target.value, 10) || 4)}
+              className="input-field"
+            />
+          </div>
           <div className="sm:col-span-2 flex items-end">
             <label className="flex items-center gap-3 cursor-pointer text-sm text-[var(--text-secondary)]">
               <input
@@ -302,6 +358,35 @@ export default function OutreachPage() {
 
         {batchError && (
           <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">{batchError}</div>
+        )}
+
+        {batchLoading && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-secondary)]">
+              <span className="font-medium">
+                {batchTotal > 0 ? `${Math.min(batchCompleted, batchTotal)} / ${batchTotal} processed` : "Preparing…"}
+              </span>
+              <span className="font-mono">
+                {(batchStatus || "running").toLowerCase()}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-black/20 border border-[var(--border-subtle)] overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-teal-500 to-cyan-500 transition-all"
+                style={{
+                  width:
+                    batchTotal > 0
+                      ? `${Math.max(2, Math.min(100, Math.round((batchCompleted / batchTotal) * 100)))}%`
+                      : "8%",
+                }}
+              />
+            </div>
+            {batchCompany ? (
+              <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                Current: <span className="text-[var(--text-primary)]">{batchCompany}</span>
+              </div>
+            ) : null}
+          </div>
         )}
 
         <button
