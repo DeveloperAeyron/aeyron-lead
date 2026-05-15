@@ -3,4 +3,5 @@ __pycache__/
 *.py[cod]
 .DS_Store
 backend/data/
+backend/.research_cache/
 *.xlsx

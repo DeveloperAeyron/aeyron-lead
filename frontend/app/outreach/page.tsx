@@ -33,7 +33,7 @@ export default function OutreachPage() {
   const [additionalContext, setAdditionalContext] = useState("");
   const [newsJson, setNewsJson] = useState("");
   const [showOllama, setShowOllama] = useState(false);
-  const [model, setModel] = useState("qwen2.5:3b");
+  const [model, setModel] = useState("gemma3:12b");
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
   const [temperature, setTemperature] = useState(0.25);
   const [timeoutS, setTimeoutS] = useState(300);
@@ -201,7 +201,7 @@ export default function OutreachPage() {
       fd.append("max_rows", String(batchMaxRows));
       fd.append("concurrency", String(batchConcurrency));
       fd.append("do_research", batchSkipResearch ? "false" : "true");
-      fd.append("model", model.trim() || "qwen2.5:3b");
+      fd.append("model", model.trim() || "gemma3:12b");
       fd.append("ollama_url", ollamaUrl.trim() || "http://localhost:11434");
       fd.append("temperature", String(temperature));
       fd.append("timeout_s", String(timeoutS));

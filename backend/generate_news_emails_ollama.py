@@ -321,6 +321,43 @@ def _research_company(company: str, args: argparse.Namespace) -> Mapping[str, An
             "or keep it inside the backend folder."
         ) from exc
 
+    from research_cache import (
+        fingerprint_key,
+        read_cached_payload,
+        resolve_cache_root,
+        write_cached_payload,
+    )
+
+    disable_hf = bool(getattr(args, "research_disable_hf", True))
+    use_cache = bool(getattr(args, "research_disk_cache", True))
+    cache_ttl = float(getattr(args, "research_cache_ttl_hours", 168.0) or 168.0)
+    cache_dir_override = getattr(args, "research_cache_dir", None)
+
+    cache_root = resolve_cache_root(cache_dir_override if isinstance(cache_dir_override, str) else None)
+    fp = fingerprint_key(
+        company,
+        limit=int(args.research_limit),
+        per_source_limit=int(args.per_source_limit),
+        fetch_page_limit=int(args.fetch_page_limit),
+        fetch_pages=not bool(args.no_fetch_pages),
+        no_linkedin=bool(args.no_linkedin),
+        disable_hf=disable_hf,
+    )
+
+    if use_cache and cache_root is not None:
+        cached = read_cached_payload(cache_root, fp, ttl_hours=cache_ttl)
+        if cached is not None:
+            companies = cached.get("companies") if isinstance(cached, Mapping) else None
+            if isinstance(companies, list) and companies and isinstance(companies[0], Mapping):
+                report = companies[0]
+                if args.research_output:
+                    research_path = Path(args.research_output).expanduser().resolve()
+                    research_path.parent.mkdir(parents=True, exist_ok=True)
+                    with research_path.open("w", encoding="utf-8") as f:
+                        json.dump(cached, f, ensure_ascii=False, indent=2)
+                        f.write("\n")
+                return report
+
     research_argv = [
         company,
         "--limit",
@@ -329,8 +366,9 @@ def _research_company(company: str, args: argparse.Namespace) -> Mapping[str, An
         str(args.per_source_limit),
         "--fetch-page-limit",
         str(args.fetch_page_limit),
-        "--no-hf",
     ]
+    if disable_hf:
+        research_argv.append("--no-hf")
     if not args.no_fetch_pages:
         research_argv.append("--fetch-pages")
     if args.no_linkedin:
@@ -351,6 +389,12 @@ def _research_company(company: str, args: argparse.Namespace) -> Mapping[str, An
     report = companies[0]
     if not isinstance(report, Mapping):
         raise RuntimeError(f"Unexpected research payload for {company}.")
+
+    if use_cache and cache_root is not None and isinstance(payload, Mapping):
+        try:
+            write_cached_payload(cache_root, fp, payload)
+        except OSError:
+            pass
 
     if args.research_output:
         research_path = Path(args.research_output).expanduser().resolve()
@@ -637,7 +681,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "this is used before live research."
         ),
     )
-    parser.add_argument("--model", default="qwen2.5:3b", help='Ollama model name. Default: "qwen2.5:3b"')
+    parser.add_argument("--model", default="gemma3:12b", help='Ollama model name. Default: "gemma3:12b"')
     parser.add_argument(
         "--ollama-url",
         default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
@@ -664,6 +708,27 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-linkedin", action="store_true", help="One-off mode: skip LinkedIn result discovery.")
     parser.add_argument("--headed", action="store_true", help="One-off mode: show Chromium during research.")
     parser.add_argument(
+        "--research-enable-hf",
+        action="store_true",
+        help="Allow Hugging Face inference during research when HF_TOKEN is set (slower, richer summaries).",
+    )
+    parser.add_argument(
+        "--no-research-disk-cache",
+        action="store_true",
+        help="Disable on-disk cache for repeated company research.",
+    )
+    parser.add_argument(
+        "--research-cache-hours",
+        type=float,
+        default=168.0,
+        help="TTL in hours for research cache entries (default 168).",
+    )
+    parser.add_argument(
+        "--research-cache-dir",
+        default="",
+        help="Optional directory for research cache (overrides env AEYRON_RESEARCH_CACHE_DIR).",
+    )
+    parser.add_argument(
         "--verbose",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -671,6 +736,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     args.company_name = args.company_flag or args.company or ""
+    args.research_disable_hf = not bool(getattr(args, "research_enable_hf", False))
+    args.research_disk_cache = not bool(getattr(args, "no_research_disk_cache", False))
+    args.research_cache_ttl_hours = float(getattr(args, "research_cache_hours", 168.0) or 168.0)
+    rc_dir = str(getattr(args, "research_cache_dir", "") or "").strip()
+    args.research_cache_dir = rc_dir or None
     if not args.input and not args.company_name:
         parser.error("provide a company name for one-off mode, or --input for batch CSV mode")
     return args

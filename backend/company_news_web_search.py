@@ -772,6 +772,40 @@ async def _fetch_page_text(page: Any, url: str, *, timeout_ms: int) -> str:
         return ""
 
 
+async def _serp_search_one(
+    browser_context: Any,
+    *,
+    company: str,
+    kind: str,
+    source: str,
+    url: str,
+    label: str,
+    query: str,
+    per_source_limit: int,
+    timeout_ms: int,
+    verbose: bool,
+) -> tuple[list[SearchResult], list[str]]:
+    errors: list[str] = []
+    page = await browser_context.new_page()
+    try:
+        source_results = await _search_source(
+            page,
+            company=company,
+            kind=kind,
+            source=source,
+            url=url,
+            query=query,
+            limit=per_source_limit,
+            timeout_ms=timeout_ms,
+            verbose=verbose,
+        )
+        if not source_results:
+            errors.append(f"No results from {label}.")
+        return source_results, errors
+    finally:
+        await page.close()
+
+
 async def _fetch_linkedin_profile_text(page: Any, url: str, *, timeout_ms: int) -> tuple[str, str]:
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -1123,95 +1157,153 @@ async def _collect_company(
     errors: list[str] = []
     collected: list[SearchResult] = []
     linkedin_results: list[LinkedInResult] = []
-    for kind, source, url, label in _source_urls(company):
-        page = await browser_context.new_page()
-        try:
-            source_results = await _search_source(
-                page,
-                company=company,
-                kind=kind,
-                source=source,
-                url=url,
-                limit=per_source_limit,
-                timeout_ms=timeout_ms,
-                verbose=verbose,
-            )
-            if not source_results:
-                errors.append(f"No results from {label}.")
-            collected.extend(source_results)
-        finally:
-            await page.close()
+
+    web_tasks = [
+        _serp_search_one(
+            browser_context,
+            company=company,
+            kind=kind,
+            source=source,
+            url=url,
+            label=label,
+            query="",
+            per_source_limit=per_source_limit,
+            timeout_ms=timeout_ms,
+            verbose=verbose,
+        )
+        for kind, source, url, label in _source_urls(company)
+    ]
+    web_out = await asyncio.gather(*web_tasks, return_exceptions=True)
+    for pack in web_out:
+        if isinstance(pack, BaseException):
+            errors.append(f"Web/news search failed: {type(pack).__name__}: {pack}")
+            continue
+        source_results, errs = pack
+        collected.extend(source_results)
+        errors.extend(errs)
 
     if linkedin:
-        for kind, source, url, label, query in _linkedin_source_urls(company):
-            page = await browser_context.new_page()
-            try:
-                scan_limit = max(linkedin_limit * 8, 25, per_source_limit)
-                source_results = await _search_source(
-                    page,
-                    company=company,
-                    kind=kind,
-                    source=source,
-                    url=url,
-                    query=query,
-                    limit=scan_limit,
-                    timeout_ms=timeout_ms,
-                    verbose=verbose,
-                )
-                filtered = [
-                    _to_linkedin_result(company, item, query)
-                    for item in source_results
-                    if _is_linkedin_url(item.url)
-                ]
-                if not filtered:
-                    errors.append(f"No results from {label} via {source}.")
-                linkedin_results.extend(filtered)
-            finally:
-                await page.close()
+        li_sem = asyncio.Semaphore(4)
+
+        async def _linkedin_one(spec: tuple[str, str, str, str, str]) -> tuple[list[LinkedInResult], list[str]]:
+            kind, source, url, label, query = spec
+            local_err: list[str] = []
+            async with li_sem:
+                page = await browser_context.new_page()
+                try:
+                    scan_limit = max(linkedin_limit * 8, 25, per_source_limit)
+                    source_results = await _search_source(
+                        page,
+                        company=company,
+                        kind=kind,
+                        source=source,
+                        url=url,
+                        query=query,
+                        limit=scan_limit,
+                        timeout_ms=timeout_ms,
+                        verbose=verbose,
+                    )
+                    filtered = [
+                        _to_linkedin_result(company, item, query)
+                        for item in source_results
+                        if _is_linkedin_url(item.url)
+                    ]
+                    if not filtered:
+                        local_err.append(f"No results from {label} via {source}.")
+                    return filtered, local_err
+                finally:
+                    await page.close()
+
+        li_specs = list(_linkedin_source_urls(company))
+        li_out = await asyncio.gather(*[_linkedin_one(s) for s in li_specs], return_exceptions=True)
+        for pack in li_out:
+            if isinstance(pack, BaseException):
+                errors.append(f"LinkedIn search failed: {type(pack).__name__}: {pack}")
+                continue
+            filtered, local_err = pack
+            linkedin_results.extend(filtered)
+            errors.extend(local_err)
 
     collected = _dedupe(sorted(collected, key=lambda item: item.score, reverse=True))
     collected = collected[:final_limit]
     linkedin_results = _dedupe_linkedin(linkedin_results)[:linkedin_limit]
 
     if linkedin_fetch_pages and linkedin_results:
-        linkedin_page = await browser_context.new_page()
-        try:
-            for item in linkedin_results:
-                _log(verbose, f"{company}: fetching LinkedIn public text for {item.url}")
-                status, text = await _fetch_linkedin_profile_text(
-                    linkedin_page,
-                    item.url,
-                    timeout_ms=timeout_ms,
-                )
-                item.profile_page_status = status
-                item.profile_page_text = text
-                if text:
-                    item.detail_depth = "linkedin_public_page" if status == "public_text" else status
-                    item.evidence_chars += len(text)
-                    item.evidence_words += len(text.split())
-                    extra_roles = _matched_terms(list(ROLE_TERMS), text)
-                    item.matched_role_terms = sorted(set(item.matched_role_terms + extra_roles))
-                    item.seniority_level = _seniority_level(item.matched_role_terms)
-        finally:
-            await linkedin_page.close()
+        li_prof_sem = asyncio.Semaphore(3)
+
+        async def _linkedin_profile_one(item: LinkedInResult) -> None:
+            async with li_prof_sem:
+                page = await browser_context.new_page()
+                try:
+                    _log(verbose, f"{company}: fetching LinkedIn public text for {item.url}")
+                    status, text = await _fetch_linkedin_profile_text(
+                        page,
+                        item.url,
+                        timeout_ms=timeout_ms,
+                    )
+                    item.profile_page_status = status
+                    item.profile_page_text = text
+                    if text:
+                        item.detail_depth = "linkedin_public_page" if status == "public_text" else status
+                        item.evidence_chars += len(text)
+                        item.evidence_words += len(text.split())
+                        extra_roles = _matched_terms(list(ROLE_TERMS), text)
+                        item.matched_role_terms = sorted(set(item.matched_role_terms + extra_roles))
+                        item.seniority_level = _seniority_level(item.matched_role_terms)
+                finally:
+                    await page.close()
+
+        for prof in await asyncio.gather(
+            *[_linkedin_profile_one(i) for i in linkedin_results],
+            return_exceptions=True,
+        ):
+            if isinstance(prof, BaseException):
+                errors.append(f"LinkedIn profile fetch failed: {type(prof).__name__}: {prof}")
 
     if fetch_pages and collected:
-        fetch_page = await browser_context.new_page()
-        try:
-            for item in collected[:fetch_page_limit]:
-                _log(verbose, f"{company}: fetching page text for {item.url}")
-                item.fetched_text = await _fetch_page_text(fetch_page, item.url, timeout_ms=timeout_ms)
-        finally:
-            await fetch_page.close()
+        fetch_sem = asyncio.Semaphore(4)
 
-    for item in collected:
-        if item.fetched_text:
-            item.hf_summary = hf.summarize(f"{item.title}. {item.fetched_text}", max_chars=10_000)
-        if hf_relevance:
-            item.hf_relevance = hf.relevance(
-                company=company,
-                text=f"{item.title}. {item.snippet}. {item.fetched_text}",
-            )
+        async def _fetch_result_page(item: SearchResult) -> tuple[SearchResult, str]:
+            async with fetch_sem:
+                page = await browser_context.new_page()
+                try:
+                    _log(verbose, f"{company}: fetching page text for {item.url}")
+                    text = await _fetch_page_text(page, item.url, timeout_ms=timeout_ms)
+                    return item, text
+                finally:
+                    await page.close()
+
+        fetch_out = await asyncio.gather(
+            *[_fetch_result_page(i) for i in collected[:fetch_page_limit]],
+            return_exceptions=True,
+        )
+        for pack in fetch_out:
+            if isinstance(pack, BaseException):
+                errors.append(f"Result page fetch failed: {type(pack).__name__}: {pack}")
+                continue
+            item, text = pack
+            item.fetched_text = text
+
+    async def _hf_summarise(item: SearchResult) -> None:
+        if not item.fetched_text:
+            return
+        item.hf_summary = await asyncio.to_thread(
+            hf.summarize,
+            f"{item.title}. {item.fetched_text}",
+            max_chars=10_000,
+        )
+
+    async def _hf_relevance(item: SearchResult) -> None:
+        if not hf_relevance:
+            return
+        item.hf_relevance = await asyncio.to_thread(
+            hf.relevance,
+            company=company,
+            text=f"{item.title}. {item.snippet}. {item.fetched_text}",
+        )
+
+    await asyncio.gather(*[_hf_summarise(i) for i in collected], return_exceptions=True)
+    await asyncio.gather(*[_hf_relevance(i) for i in collected], return_exceptions=True)
 
     summary = _build_company_summary(company, collected, hf)
     insights = _build_insights(company, collected, linkedin_results, hf)

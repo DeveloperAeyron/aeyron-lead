@@ -14,7 +14,7 @@
 from ollama import chat
 
 response = chat(
-  model="qwen2.5:3b",
+  model="gemma3:12b",
   messages=[{'role': 'user', 'content': 'hi.'}]
 )
 print(response.message.content)

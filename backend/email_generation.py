@@ -61,7 +61,7 @@ class EmailGenerationInput:
     additional_context: str = ""
     do_research: bool = True
     ollama_url: str = "http://localhost:11434"
-    model: str = "qwen2.5:3b"
+    model: str = "gemma3:12b"
     temperature: float = 0.25
     timeout_s: int = 300
     context_items: int = 8
@@ -73,6 +73,12 @@ class EmailGenerationInput:
     no_linkedin: bool = False
     headed: bool = False
     website_url: str = ""
+    # When True (default), research skips Hugging Face inference (faster, no token). Set False if HF_TOKEN is set.
+    research_disable_hf: bool = True
+    # Disk cache for Playwright research payloads (same company + settings hits skip browser).
+    research_disk_cache: bool = True
+    research_cache_ttl_hours: float = 168.0
+    research_cache_dir: str = ""
 
 
 def fetch_website_plain_text(
@@ -118,6 +124,11 @@ def prepend_prospect_website_block(news_context: list[dict[str, str]], website_u
     if not u:
         return
     canon = u if u.startswith(("http://", "https://")) else f"https://{u}"
+    canon_lower = canon.rstrip("/").lower()
+    for it in news_context:
+        uu = (it.get("url") or "").strip().rstrip("/").lower()
+        if uu and (uu == canon_lower or canon_lower.endswith(uu) or uu.endswith(canon_lower)):
+            return
     body = fetch_website_plain_text(canon)
     news_context.insert(
         0,
@@ -143,6 +154,10 @@ def _research_namespace(inp: EmailGenerationInput) -> SimpleNamespace:
         headed=inp.headed,
         verbose=False,
         research_output=None,
+        research_disable_hf=inp.research_disable_hf,
+        research_disk_cache=inp.research_disk_cache,
+        research_cache_ttl_hours=inp.research_cache_ttl_hours,
+        research_cache_dir=(inp.research_cache_dir or "").strip() or None,
     )
 
 

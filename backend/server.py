@@ -317,7 +317,7 @@ class GenerateEmailRequest(BaseModel):
     website_url: str = ""
     do_research: bool = True
     ollama_url: str = "http://localhost:11434"
-    model: str = "qwen2.5:3b"
+    model: str = "gemma3:12b"
     temperature: float = 0.25
     timeout_s: int = 300
     context_items: int = 8
@@ -328,6 +328,10 @@ class GenerateEmailRequest(BaseModel):
     no_fetch_pages: bool = False
     no_linkedin: bool = False
     headed: bool = False
+    research_disable_hf: bool = True
+    research_disk_cache: bool = True
+    research_cache_ttl_hours: float = 168.0
+    research_cache_dir: str = ""
 
 
 @app.post("/api/generate-email")
@@ -345,7 +349,7 @@ async def generate_email(req: GenerateEmailRequest):
         website_url=req.website_url.strip(),
         do_research=req.do_research,
         ollama_url=req.ollama_url.strip() or "http://localhost:11434",
-        model=req.model.strip() or "qwen2.5:3b",
+        model=req.model.strip() or "gemma3:12b",
         temperature=req.temperature,
         timeout_s=req.timeout_s,
         context_items=req.context_items,
@@ -356,6 +360,10 @@ async def generate_email(req: GenerateEmailRequest):
         no_fetch_pages=req.no_fetch_pages,
         no_linkedin=req.no_linkedin,
         headed=req.headed,
+        research_disable_hf=req.research_disable_hf,
+        research_disk_cache=req.research_disk_cache,
+        research_cache_ttl_hours=req.research_cache_ttl_hours,
+        research_cache_dir=req.research_cache_dir.strip(),
     )
     try:
         return await asyncio.to_thread(generate_email_draft, inp)
@@ -369,7 +377,7 @@ async def generate_email(req: GenerateEmailRequest):
 @app.post("/api/generate-email/batch")
 async def generate_email_batch(
     file: UploadFile = File(...),
-    model: str = Form("qwen2.5:3b"),
+    model: str = Form("gemma3:12b"),
     ollama_url: str = Form("http://localhost:11434"),
     temperature: float = Form(0.22),
     timeout_s: int = Form(420),
@@ -379,6 +387,10 @@ async def generate_email_batch(
     concurrency: int = Form(4),
     context_items: int = Form(12),
     context_snippet_chars: int = Form(5200),
+    research_disable_hf: str = Form("true"),
+    research_disk_cache: str = Form("true"),
+    research_cache_ttl_hours: float = Form(168.0),
+    research_cache_dir: str = Form(""),
 ):
     """
     Accept .csv, .xlsx, or .xlsm with columns such as email, name (or first/last name), company name.
@@ -410,13 +422,15 @@ async def generate_email_batch(
         raise HTTPException(status_code=400, detail="No data rows found under the header row.")
 
     research_on = (do_research or "").strip().lower() in ("1", "true", "yes", "on")
+    hf_off = (research_disable_hf or "").strip().lower() in ("1", "true", "yes", "on")
+    cache_on = (research_disk_cache or "").strip().lower() in ("1", "true", "yes", "on")
 
     base = EmailGenerationInput(
         company_name="batch",
         email="",
         do_research=research_on,
         ollama_url=(ollama_url or "").strip() or "http://localhost:11434",
-        model=(model or "").strip() or "qwen2.5:3b",
+        model=(model or "").strip() or "gemma3:12b",
         temperature=float(temperature),
         timeout_s=int(timeout_s),
         context_items=max(3, int(context_items)),
@@ -424,6 +438,10 @@ async def generate_email_batch(
         research_limit=14,
         per_source_limit=10,
         fetch_page_limit=10,
+        research_disable_hf=hf_off,
+        research_disk_cache=cache_on,
+        research_cache_ttl_hours=float(research_cache_ttl_hours or 168.0),
+        research_cache_dir=(research_cache_dir or "").strip(),
     )
 
     cap = max(1, min(int(max_rows), 200))
@@ -452,7 +470,7 @@ async def generate_email_batch(
 @app.post("/api/generate-email/batch-async")
 async def generate_email_batch_async(
     file: UploadFile = File(...),
-    model: str = Form("qwen2.5:3b"),
+    model: str = Form("gemma3:12b"),
     ollama_url: str = Form("http://localhost:11434"),
     temperature: float = Form(0.22),
     timeout_s: int = Form(420),
@@ -462,6 +480,10 @@ async def generate_email_batch_async(
     concurrency: int = Form(4),
     context_items: int = Form(12),
     context_snippet_chars: int = Form(5200),
+    research_disable_hf: str = Form("true"),
+    research_disk_cache: str = Form("true"),
+    research_cache_ttl_hours: float = Form(168.0),
+    research_cache_dir: str = Form(""),
 ):
     """Start a batch job and return a job id immediately (recommended behind ngrok/proxies)."""
     fname = (file.filename or "").lower()
@@ -496,13 +518,15 @@ async def generate_email_batch_async(
     cap = max(1, min(int(max_rows), 200))
     gap = max(0, int(sleep_ms))
     conc = max(1, min(int(concurrency), 32))
+    hf_off = (research_disable_hf or "").strip().lower() in ("1", "true", "yes", "on")
+    cache_on = (research_disk_cache or "").strip().lower() in ("1", "true", "yes", "on")
 
     base = EmailGenerationInput(
         company_name="batch",
         email="",
         do_research=research_on,
         ollama_url=(ollama_url or "").strip() or "http://localhost:11434",
-        model=(model or "").strip() or "qwen2.5:3b",
+        model=(model or "").strip() or "gemma3:12b",
         temperature=float(temperature),
         timeout_s=int(timeout_s),
         context_items=max(3, int(context_items)),
@@ -510,6 +534,10 @@ async def generate_email_batch_async(
         research_limit=14,
         per_source_limit=10,
         fetch_page_limit=10,
+        research_disable_hf=hf_off,
+        research_disk_cache=cache_on,
+        research_cache_ttl_hours=float(research_cache_ttl_hours or 168.0),
+        research_cache_dir=(research_cache_dir or "").strip(),
     )
 
     def _run_job() -> None:
